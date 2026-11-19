@@ -66,6 +66,33 @@
       loop_control:
         label: "{{ item.dest }}"
 
+    # The daemon's configuration is the one file here another program parses,
+    # so it is read back the way the daemon reads it: as TOML. It must say
+    # what the settings ask for and nothing they do not.
+    - name: Read the daemon's configuration back as TOML
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - import json, sys, tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))))
+          - "{{ render_dir }}/nucleated-config.toml"
+      register: render_daemon
+      changed_when: false
+
+    - name: Check it against the settings
+      ansible.builtin.assert:
+        that:
+          - render_config.target == watch_target
+          - render_config.environment | map(attribute='name') | list == environments | map(attribute='name') | list
+          - ('ups' in render_config) == (nut_enabled | bool)
+          - not (nut_enabled | bool) or render_config.ups.name == ups_name ~ '@localhost'
+          - ('notify' in render_config) == (box_notify_url | length > 0)
+          - box_notify_url | length == 0 or render_config.notify.url == box_notify_url
+          - box_notify_url | length == 0 or ('token_file' in render_config.notify) == (secret_refs.box_notify_token | length > 0)
+        quiet: true
+      vars:
+        render_config: "{{ render_daemon.stdout | from_json }}"
+
     - name: Render each agent server's settings and its Claude Code settings
       ansible.builtin.template:
         src: "{{ outer.1.src }}"

@@ -19,6 +19,11 @@
     env_claude: "{{ {} if env_config_dir == agent_home ~ '/.claude' else {'CLAUDE_CONFIG_DIR': env_config_dir} }}"
     # Nucarium Watch is hosted only, so its address is not a setting.
     watch_console_url: https://app.nucarium.com
+    # What box_notify_url may be: https, or http to the box itself, with no
+    # username or password, and nothing that would break out of the quotes it
+    # is written between in nucleated's configuration. No fragment either:
+    # nucleated refuses one, and a config it refuses stops the whole daemon.
+    notify_url_pattern: '^(https://[^\s"\\/?#@]+|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?)([/?][^\s"\\#]*)?$'
 
   pre_tasks:
     - name: Check the settings
@@ -33,12 +38,15 @@
           - hcp_mode in ['none', 'file', 'vault']
           - hcp_mode == 'none' or secret_refs.hcp_token | length > 0
           - hcp_mode != 'vault' or secret_refs.vault_read_token | length > 0
+          - box_notify_url | default('', true) | trim == '' or box_notify_url | trim is match(notify_url_pattern)
         fail_msg: >-
           group_vars/all.yml: environments needs at least one entry, each
           with its own name (lower-case letters, digits and hyphens) and its
           own config_dir (a full path, or left out for the first login); watch_target is hosted or none; hcp_mode is none,
           file or vault, and file and vault need secret_refs.hcp_token (vault
-          also secret_refs.vault_read_token).
+          also secret_refs.vault_read_token); box_notify_url is empty or an
+          https:// address (http:// only for localhost) with no username,
+          password or #fragment in it.
         quiet: true
       tags: always
 

@@ -2,7 +2,11 @@
 # nucleated is the one daemon on the box. Every minute it sends a heartbeat;
 # it forwards session lifecycle events from its hook; and it runs the
 # housekeeping: fetching the repositories, removing finished sessions that
-# hold nothing unsaved, and saving uncommitted work to a hidden ref.
+# hold nothing unsaved, and saving uncommitted work to a hidden ref. What the
+# heartbeat says about the box itself needs nothing installed here: the UPS
+# state comes from NUT, which answers any local user without a password; a
+# waiting reboot is a file anyone can read; and the agent servers are the
+# agent user's own units.
 - name: The box daemon, for the agent user
   become: true
   become_user: "{{ agent_user }}"
@@ -52,11 +56,29 @@
       loop_control:
         label: "{{ item.path }}"
 
-    - name: Write the daemon's configuration from the environments
+    # Written before the configuration that names it, because the daemon
+    # reads a changed configuration by itself.
+    - name: Store the token for the box's own notifier
+      ansible.builtin.copy:
+        dest: "{{ day2_notify_token_file }}"
+        content: "{{ secrets.box_notify_token }}"
+        mode: "0600"
+      no_log: true
+      when: day2_notify_has_token
+
+    - name: Write the daemon's configuration from the settings
       ansible.builtin.template:
         src: nucleated-config.toml.j2
         dest: "{{ day2_nucleated_config_file }}"
         mode: "0600"
+
+    # A token nothing uses is a secret with no purpose: it goes when the
+    # address or its reference is emptied.
+    - name: Remove the notifier's token when it is not in use
+      ansible.builtin.file:
+        path: "{{ day2_notify_token_file }}"
+        state: absent
+      when: not day2_notify_has_token
 
     - name: Install the daemon's unit
       ansible.builtin.copy:

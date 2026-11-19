@@ -1,6 +1,7 @@
 ---
 # A second shape to render: two Claude logins, a repository from another
-# owner, Watch switched off, and the Terraform token read from the vault.
+# owner, Watch switched off, the Terraform token read from the vault, no UPS,
+# and the box's own notifier with a token.
 environments:
   - name: main
     capacity: 8
@@ -12,3 +13,11 @@ repos:
   - other-org/tools
 watch_target: none
 hcp_mode: vault
+nut_enabled: false
+box_notify_url: https://ntfy.example.com/agentbox?tags=box
+# Given here, secret_refs replaces the one in group_vars/all.yml whole, so it
+# names every reference a template or a role's vars reads.
+secret_refs:
+  hcp_token: op://Infra/agentbox/hcp-terraform-token
+  vault_read_token: op://Infra/agentbox/vault-read-token
+  box_notify_token: op://Infra/agentbox/notify-token

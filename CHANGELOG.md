@@ -4,6 +4,37 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## The UPS state and the box's own notifier
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+`nucleated` now reports when the box is running on battery, and can tell you
+itself when it cannot reach Nucarium Watch.
+
+### Settings added
+
+| Setting | Default | What it is |
+|---|---|---|
+| `box_notify_url` | `""` | An address of your own that the box posts to when it cannot reach Watch: once after ten minutes, once for each session that starts waiting for you while that lasts, and once when Watch answers again. `https://`, or `http://` for a service on the box itself, with no username or password. Empty means the box posts nowhere. |
+| `secret_refs.box_notify_token` | `""` | A 1Password reference to the token for that address, sent as a bearer token. Empty means none is sent. |
+
+No setting is renamed or removed. A settings file from before these two
+existed works as it is: both read as empty.
+
+### Roles and tags
+
+| Role | What changed |
+|---|---|
+| `day2` | `nucleated`'s configuration gains `[ups]`, with the UPS's name, when `nut_enabled` is true, and `[notify]` when `box_notify_url` is set. The notifier's token is stored in `~agent/.config/nucleated/notify-token`, readable only by the agent user, left out of the nightly backup, and removed when the address or its reference is emptied. |
+
+### A box built with an earlier copy of the recipe
+
+Run `ansible-playbook site.yml --tags day2`. Nothing is restarted:
+`nucleated` reads its changed configuration by itself. Both sections need a
+release of `nucleated` that knows them; an earlier one ignores them, so
+upgrade it first (`--tags workspace`).
+
 ## 0.1.0
 
 The recipe is rebuilt around the two binaries that now do the work on the box:

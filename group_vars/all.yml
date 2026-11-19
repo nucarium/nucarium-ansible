@@ -114,6 +114,24 @@ agents_memory_max: 56G
 #           on the box shows the same view.
 watch_target: hosted
 
+# If Watch itself cannot be reached, nothing tells you that an agent is
+# waiting. Give the box an address of your own here and it tells you itself:
+# once when Watch has been unreachable for ten minutes, once for each session
+# that starts waiting for you while that lasts, and once when Watch answers
+# again. Each post carries the box's and the environment's name and a time,
+# and goes to this address only, never to Nucarium.
+#
+# The address takes the same request as an alert destination in Watch, so a
+# push topic such as https://ntfy.sh/<your-topic> works as it is. It starts
+# with https://, or http:// for a service on the box itself, and holds no
+# username or password: if it needs a token, save the token in 1Password and
+# put its reference in secret_refs.box_notify_token below.
+#
+# It is used only while watch_target is hosted and the box is signed in, and
+# it covers Watch being unreachable, not a box with no network at all.
+# Empty: the box posts nowhere.
+box_notify_url: ""
+
 # ---------------------------------------------------------------------------
 # UPS
 # ---------------------------------------------------------------------------
@@ -191,6 +209,8 @@ hcp_mode: none
 #   watch_machine_token      A Nucarium Watch machine token, minted in the
 #                            Watch console. Empty: run `nucleate login` on
 #                            the box instead.
+#   box_notify_token         The token for box_notify_url, sent as a bearer
+#                            token. Empty: none is sent.
 #   restic_repository        The nightly backup's bucket, as a restic
 #                            repository (s3:https://…). Empty: no backup.
 #   restic_password          The backup's encryption password.
@@ -207,6 +227,7 @@ secret_refs:
   hcp_token: ""
   vault_read_token: ""
   watch_machine_token: ""
+  box_notify_token: ""
   restic_repository: ""
   restic_password: ""
   restic_access_key_id: ""

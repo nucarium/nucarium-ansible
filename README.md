@@ -44,6 +44,9 @@ read, but it has not been run end to end on real hardware.
   needs you or the box goes dark. Watch sees which agent is doing what, where
   and since when, never what it was told or what it wrote. With Watch off,
   nothing leaves the box and `nucleated status` shows the same view locally.
+- **A voice of its own when Watch is silent, if you want it.** Give the box
+  an address of yours and it posts there itself when it cannot reach Watch,
+  and for each session that starts waiting for you meanwhile.
 
 ## What you need
 
@@ -125,7 +128,7 @@ Roles run in this order. Each has a tag of the same name.
 | `claude` | Claude Code and, for each login, its settings file: sandbox, update channel, deny rules, the GitHub token hook and the `nucleated hook` entries. Also your `agent-context/` files |
 | `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server |
 | `agent_servers` | One `agent-server@<name>.service` per entry in `environments`, under one shared memory cap. Enabled, not started |
-| `day2` | `nucleated`: its configuration, generated from `environments`, its unit, and the sign-in to Nucarium Watch if you gave a token. Also the two jobs the daemon does not own: a weekly cleanup of container images, the pnpm store and the journal, and the nightly encrypted backup if configured |
+| `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token. Also the two jobs the daemon does not own: a weekly cleanup of container images, the pnpm store and the journal, and the nightly encrypted backup if configured |
 
 ## Reporting to Nucarium Watch
 
@@ -158,6 +161,35 @@ token.
 
 To rotate a token: mint a new one, update the 1Password item, revoke the old
 one in the Watch console, and run `ansible-playbook site.yml --tags day2`.
+
+### When Watch cannot be reached
+
+If Watch itself cannot be reached, nothing tells you that an agent is waiting.
+Set `box_notify_url` in `group_vars/all.yml` to an address of your own and the
+box tells you itself. It posts there:
+
+- once when no heartbeat has been accepted for ten minutes;
+- once for each session that starts waiting for you while that lasts;
+- once when Watch accepts a heartbeat again.
+
+Each post carries the box's name, the environment's name and a time, nothing
+else, and goes to that address only, never to Nucarium. The address takes the
+same request as an alert destination in Watch, so a push topic such as
+`https://ntfy.sh/<your-topic>` works as it is. It must start with `https://`
+(`http://` only for a service on the box itself) and hold no username or
+password. If it needs a token, save the token in 1Password and put its
+reference in `secret_refs.box_notify_token`: the playbook stores it in
+`~agent/.config/nucleated/notify-token`, which only the agent user can read,
+and the box sends it as a bearer token.
+
+The box posts only while `watch_target` is `hosted` and it is signed in. This
+covers Watch being unreachable. It does not cover a box with no network at
+all: that box cannot reach your address either, and Watch tells you it has
+gone dark.
+
+On a box with a UPS, the playbook also gives `nucleated` the UPS's name, so
+its heartbeat says when the box is running on battery. `nucleated` asks NUT,
+which answers any user on the box without a password.
 
 ## What is still a manual step, and why
 
@@ -193,6 +225,7 @@ ansible-playbook site.yml --tags claude,day2
 | Change an environment's capacity or the memory cap | `environments`, `agents_memory_*` | `--tags agent_servers`, then restart that server |
 | Upgrade `nucleate` and `nucleated` | `nucleate_version` and `nucleate_sha256` | `--tags workspace` |
 | Turn Watch on or off, or rotate its token | `watch_target`, the 1Password item | `--tags day2` |
+| Set, change or remove the box's own notifier | `box_notify_url`, the 1Password item | `--tags day2` |
 | Renew the packages token | the 1Password item | `--tags toolchain` |
 
 The playbook never restarts an agent server, because that ends its sessions.
@@ -244,6 +277,8 @@ committed to your copy of it.
   credentials are root's, in `/etc/restic/env`. The packages token is in
   `~agent/.npmrc`, which is why it can only download. The Watch machine
   token is in `~agent/.config/nucleated/token`, written by `nucleate login`.
+  The notifier's token, if you gave one, is beside it in `notify-token`,
+  mode 600, and is left out of the nightly backup.
 
 ## Checking changes to the recipe
 
@@ -258,7 +293,8 @@ PATH="$PWD/.venv/bin:$PATH" scripts/check
 It syntax-checks both playbooks, runs `ansible-lint`, `yamllint` and
 `shellcheck`, and renders every template from the example settings into
 `out/render/`, in two shapes, so you can read exactly what a box would
-receive. The Build workflow (`.github/workflows/build.yml`) runs the same
+receive. It reads `nucleated`'s rendered configuration back as TOML and
+checks it against the settings. The Build workflow (`.github/workflows/build.yml`) runs the same
 script on every pull request and on `main`.
 
 To run the linters and the commit-message check before each commit, install

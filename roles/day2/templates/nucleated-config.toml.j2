@@ -16,6 +16,28 @@ target = "hosted"
 # the box.
 target = "none"
 {% endif %}
+{% if nut_enabled | bool %}
+
+# The UPS, as NUT names it. The daemon asks NUT whether the box is running on
+# battery and reports yes or no. Any user on the box may ask; no password is
+# involved.
+[ups]
+name = "{{ ups_name }}@localhost"
+{% endif %}
+{% if day2_notify_url %}
+
+# Where the box speaks for itself when it cannot reach Watch: once when Watch
+# has been unreachable for ten minutes, once for each session that starts
+# waiting for you while that lasts, and once when Watch answers again. Each
+# post carries the box's and the environment's name and a time, and goes to
+# this address only, never to Nucarium. The box posts only while it reports
+# to Watch.
+[notify]
+url = {{ day2_notify_url | to_json }}
+{% if day2_notify_has_token %}
+token_file = "{{ day2_notify_token_file }}"
+{% endif %}
+{% endif %}
 {% for env in environments %}
 
 # Environment {{ env.name }}: one Claude login and its agent server, over the
