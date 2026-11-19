@@ -306,6 +306,19 @@ Running a second organisation's work in a virtual machine on the same box, and
 rotating an HCP Terraform token on a schedule, are done by hand. The guide at
 [nucarium.dev](https://nucarium.dev) describes both.
 
+## Releases
+
+Nobody tags a release by hand. A push to `main` runs semantic-release, which
+reads the Conventional Commits since the last tag and creates the GitHub
+Release and its tag: a `fix:` makes a patch release, a `feat:` a minor one,
+and a push with neither makes none. Publishing the release packs the recipe
+as `nucarium-box-<version>.tar.gz`, holding one folder of the same name, and
+attaches it with its SHA-256. That archive is what the installer at
+`nucarium.sh` downloads and checks.
+
+Releasing needs the Robot App's two secrets on the repository, `GH_APP_ID`
+and `GH_PRIVATE_KEY`.
+
 ## Licence
 
 Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE) or

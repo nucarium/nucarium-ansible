@@ -1,0 +1,5 @@
+# Left out of the release archive: they only mean something in the repository.
+.github export-ignore
+.gitattributes export-ignore
+.pre-commit-config.yaml export-ignore
+.releaserc.json export-ignore

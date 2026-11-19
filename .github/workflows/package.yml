@@ -1,0 +1,59 @@
+---
+name: Package
+
+# When a release is published, pack the recipe the way the installer at
+# nucarium.sh expects it and attach it to that release: one archive,
+# nucarium-box-<version>.tar.gz, holding one folder, nucarium-box-<version>/,
+# with its checksum beside it.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name }}
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # On a release event the default ref is the release's tag.
+      - uses: actions/checkout@v7
+      - name: Pack the recipe
+        run: |
+          if ! printf '%s\n' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::The release tag \"$TAG\" is not a version like v1.2.3."
+            exit 1
+          fi
+          name="nucarium-box-${TAG#v}"
+          # The same command the installer's own packing script uses, so the
+          # archive is byte for byte what `git archive` gives for this tag.
+          git archive --format=tar.gz --prefix="$name/" -o "$name.tar.gz" HEAD
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          cat "$name.tar.gz.sha256"
+      - name: Check the archive holds what the installer reads
+        run: |
+          name="nucarium-box-${TAG#v}"
+          tar -tzf "$name.tar.gz" > listing.txt
+          if grep -qv "^$name/" listing.txt; then
+            echo "::error::The archive has entries outside $name/."
+            exit 1
+          fi
+          for needed in site.yml autoinstall.yml inventory.ini group_vars/all.yml requirements.yml README.md; do
+            grep -qx "$name/$needed" listing.txt || { echo "::error::The archive has no $needed."; exit 1; }
+          done
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="nucarium-box-${TAG#v}"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$name.tar.gz" "$name.tar.gz.sha256"
