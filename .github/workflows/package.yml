@@ -4,7 +4,8 @@ name: Package
 # When a release is published, pack the recipe the way the installer at
 # nucarium.sh expects it and attach it to that release: one archive,
 # nucarium-box-<version>.tar.gz, holding one folder, nucarium-box-<version>/,
-# with its checksum beside it.
+# with its checksum beside it. Then tell the installer's repository, so the
+# installer's pin moves to this release.
 
 on:
   release:
@@ -25,10 +26,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      sha256: ${{ steps.pack.outputs.sha256 }}
     steps:
       # On a release event the default ref is the release's tag.
       - uses: actions/checkout@v7
       - name: Pack the recipe
+        id: pack
         run: |
           if ! printf '%s\n' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
             echo "::error::The release tag \"$TAG\" is not a version like v1.2.3."
@@ -40,6 +44,7 @@ jobs:
           git archive --format=tar.gz --prefix="$name/" -o "$name.tar.gz" HEAD
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
           cat "$name.tar.gz.sha256"
+          echo "sha256=$(cut -d' ' -f1 "$name.tar.gz.sha256")" >> "$GITHUB_OUTPUT"
       - name: Check the archive holds what the installer reads
         run: |
           name="nucarium-box-${TAG#v}"
@@ -57,3 +62,30 @@ jobs:
         run: |
           name="nucarium-box-${TAG#v}"
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$name.tar.gz" "$name.tar.gz.sha256"
+
+  # Tells nucarium/nucarium, where the installer at nucarium.sh is kept, the
+  # version and the archive's checksum. Its Pin box recipe workflow checks
+  # them against the archive attached above and moves the installer's pin.
+  # The Robot App must be installed on that repository too; if it is not, this
+  # job fails and the release is still whole.
+  announce:
+    needs: package
+    runs-on: ubuntu-latest
+    env:
+      SHA256: ${{ needs.package.outputs.sha256 }}
+    steps:
+      - name: Generate Robot App token for the installer's repository
+        uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_PRIVATE_KEY }}
+          owner: nucarium
+          repositories: nucarium
+      - name: Tell the installer
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          jq -n --arg version "${TAG#v}" --arg sha256 "$SHA256" \
+            '{event_type: "box-released", client_payload: {version: $version, sha256: $sha256}}' \
+            | gh api repos/nucarium/nucarium/dispatches --input -

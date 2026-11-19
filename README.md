@@ -316,8 +316,21 @@ as `nucarium-box-<version>.tar.gz`, holding one folder of the same name, and
 attaches it with its SHA-256. That archive is what the installer at
 `nucarium.sh` downloads and checks.
 
-Releasing needs the Robot App's two secrets on the repository, `GH_APP_ID`
-and `GH_PRIVATE_KEY`.
+Nobody copies a checksum by hand either. The two pins follow the releases:
+
+| When | This happens | In |
+|---|---|---|
+| `nucarium-cli` publishes a release of `nucleate` | `nucleate_version` and `nucleate_sha256` in `group_vars/all.yml` move to it, in a commit `feat: nucleate <version>`, which releases the recipe | `pin-nucleate.yml`, here |
+| This recipe publishes a release | The installer's repository is told the version and the archive's checksum, and moves the installer's pin | `package.yml`, here, then `pin-box.yml` in `nucarium/nucarium` |
+
+Each side checks what it is told. `pin-nucleate.yml` downloads the Linux
+archive the playbook installs and refuses the pin unless it hashes to the
+checksum it was sent. It also refuses to move the pin backwards, and stops if
+a version it already pins arrives with a different checksum.
+
+All of it needs the Robot App's two secrets on the repository, `GH_APP_ID`
+and `GH_PRIVATE_KEY`, and the App installed on `nucarium-cli` and `nucarium`
+as well as here.
 
 ## Licence
 
