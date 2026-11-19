@@ -17,7 +17,7 @@ to Nucarium Watch or nowhere.
 | `environments` | one entry, `name: main`, `capacity: 12` | A list with one entry per Claude login. Each entry has a `name`, an optional `config_dir` (a full path; left out, it is `~/.claude` in the agent user's home) and an optional `capacity` (left out, 12). |
 | `watch_target` | `hosted` | Where the box reports: `hosted` is Nucarium Watch, `none` is nowhere. There is no address setting, because Watch is hosted only. |
 | `nucleate_version` | `"0.1.0"` | The release of `nucleate` and `nucleated` to install. |
-| `nucleate_sha256` | sixty-four zeros | The SHA-256 of that release's Linux archive. The playbook stops until it is the published checksum, unless `nucleate_local_archive` is set. |
+| `nucleate_sha256` | the published checksum of 0.1.0 | The SHA-256 of that release's x86_64 Linux archive. The download is refused unless it matches. A value of all zeros stops the playbook, unless `nucleate_local_archive` is set. |
 | `nucleate_local_archive` | `""` | A `.tar.gz` on your workstation to install instead of the release, for testing. |
 | `secret_refs.watch_machine_token` | `""` | A 1Password reference to a Nucarium Watch machine token. Empty means you run `nucleate login` on the box. |
 
