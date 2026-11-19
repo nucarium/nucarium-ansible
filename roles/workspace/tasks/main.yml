@@ -1,0 +1,8 @@
+---
+# The workspace: nucleate, the CLI that manages it, and the nucleus, the
+# folder it manages.
+- name: Install nucleate and nucleated
+  ansible.builtin.import_tasks: install.yml
+
+- name: Create the nucleus and make the repositories available
+  ansible.builtin.import_tasks: nucleus.yml

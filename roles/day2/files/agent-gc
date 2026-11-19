@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Weekly disk cleanup of what nucleated does not look after: old container
+# images, pnpm's package store and the agent user's journal. Sessions and
+# their worktrees are nucleated's job (its cleanup, refresh and snapshot).
+# Try it without removing anything: DRY_RUN=1 agent-gc
+set -uo pipefail
+DRY_RUN="${DRY_RUN:-0}"
+echo "== agent-gc $(date -Is) dry_run=$DRY_RUN"
+df -h / | tail -1
+if [ "$DRY_RUN" = 1 ]; then
+  command -v podman >/dev/null && podman system df
+  command -v pnpm >/dev/null && echo "pnpm store: $(pnpm store path 2>/dev/null)"
+  journalctl --user --disk-usage 2>/dev/null
+  exit 0
+fi
+if command -v podman >/dev/null; then
+  podman system prune -f --filter until=720h 2>/dev/null || true
+fi
+if command -v pnpm >/dev/null; then
+  pnpm store prune >/dev/null 2>&1 || true
+fi
+journalctl --user --vacuum-size=200M --quiet 2>/dev/null || true
+df -h / | tail -1

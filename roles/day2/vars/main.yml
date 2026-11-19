@@ -1,0 +1,26 @@
+---
+# Where nucleated reads its configuration and where nucleate login keeps the
+# machine token, as the nucleate README documents them. Only nucleate login
+# writes the token file.
+day2_nucleated_config_file: "{{ agent_home }}/.config/nucleated/config.toml"
+day2_watch_token_file: "{{ agent_home }}/.config/nucleated/token"
+
+# Every Claude login's configuration folder (transcripts, settings, skills).
+day2_claude_dirs: "{{ environments | map(attribute='config_dir', default=agent_home ~ '/.claude') | list }}"
+
+# What the daemon replaces. A box built with an earlier version of the recipe
+# still has these; they are stopped and removed.
+day2_retired_units:
+  - heartbeat.timer
+  - heartbeat.service
+  - wip-snapshot.timer
+  - wip-snapshot.service
+  - nucleate-refresh.timer
+  - nucleate-refresh.service
+day2_retired_files:
+  - .local/bin/heartbeat
+  - .local/bin/wip-snapshot
+  - .local/state/wip-snapshots
+  - .config/heartbeat-token
+  - .claude/hooks/notify.sh
+  - .claude/hooks/push-token

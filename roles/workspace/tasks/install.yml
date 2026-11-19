@@ -1,0 +1,88 @@
+---
+# Installs one release of nucleate (the workspace CLI) and nucleated (the box
+# daemon) for the agent user. Both ship in the same archive, from the
+# repository named in this role's vars.
+
+- name: Check the nucleate release settings
+  ansible.builtin.assert:
+    that:
+      - nucleate_local_archive | length > 0 or nucleate_sha256 is match('^[0-9a-f]{64}$')
+      - nucleate_local_archive | length > 0 or nucleate_sha256 is not match('^0+$')
+    fail_msg: >-
+      nucleate_sha256 in group_vars/all.yml must be the SHA-256 of
+      {{ workspace_nucleate_asset }}, as published beside it on the releases page.
+      To install a build of your own instead, set nucleate_local_archive.
+    quiet: true
+
+- name: Install nucleate and nucleated for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  block:
+    - name: Create the folders for the commands and the download
+      ansible.builtin.file:
+        path: "{{ agent_home }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - .local/bin
+        - .cache/nucarium
+
+    - name: Download the pinned release and verify its checksum
+      ansible.builtin.get_url:
+        url: "{{ workspace_nucleate_url }}"
+        dest: "{{ agent_home }}/.cache/nucarium/{{ workspace_nucleate_asset }}"
+        checksum: "sha256:{{ nucleate_sha256 }}"
+        mode: "0644"
+      when: nucleate_local_archive | length == 0
+
+    - name: Unpack the release
+      ansible.builtin.unarchive:
+        src: "{{ agent_home }}/.cache/nucarium/{{ workspace_nucleate_asset }}"
+        dest: "{{ agent_home }}/.local/bin"
+        remote_src: true
+        include:
+          - nucleate
+          - nucleated
+      register: workspace_release
+      when: nucleate_local_archive | length == 0
+
+    - name: Unpack a local build instead (testing)
+      ansible.builtin.unarchive:
+        src: "{{ nucleate_local_archive }}"
+        dest: "{{ agent_home }}/.local/bin"
+        include:
+          - nucleate
+          - nucleated
+      register: workspace_local
+      when: nucleate_local_archive | length > 0
+
+    - name: Check the installed version
+      ansible.builtin.command: "{{ agent_home }}/.local/bin/nucleate --version"
+      register: workspace_installed
+      changed_when: false
+      failed_when: >-
+        workspace_installed.rc != 0 or
+        (nucleate_local_archive | length == 0 and nucleate_version not in workspace_installed.stdout)
+
+    # An earlier version of the recipe ran a Python prototype of nucleate,
+    # with its MCP server in this virtual environment.
+    - name: Remove the Python prototype's virtual environment
+      ansible.builtin.file:
+        path: "{{ agent_home }}/.local/share/workspace-tools"
+        state: absent
+
+    - name: Check whether the daemon is already set up
+      ansible.builtin.stat:
+        path: "{{ agent_home }}/.config/systemd/user/nucleated.service"
+      register: workspace_daemon_unit
+
+    - name: Restart the daemon on the new version
+      ansible.builtin.systemd_service:
+        name: nucleated.service
+        scope: user
+        state: restarted
+      when:
+        - workspace_daemon_unit.stat.exists
+        - workspace_release is changed or workspace_local is changed

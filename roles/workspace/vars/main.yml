@@ -1,0 +1,7 @@
+---
+# Both binaries, nucleate and nucleated, are released from this repository in
+# one archive, with its SHA-256 published beside it as <archive>.sha256.
+workspace_nucleate_repository: https://github.com/nucarium/nucarium-cli
+workspace_nucleate_target: x86_64-unknown-linux-musl
+workspace_nucleate_asset: "nucleate-v{{ nucleate_version }}-{{ workspace_nucleate_target }}.tar.gz"
+workspace_nucleate_url: "{{ workspace_nucleate_repository }}/releases/download/v{{ nucleate_version }}/{{ workspace_nucleate_asset }}"

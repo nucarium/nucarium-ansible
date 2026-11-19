@@ -1,0 +1,88 @@
+---
+# One agent server per entry in environments: a Claude login running one
+# Remote Control server over the nucleus. Each is an instance of the unit
+# agent-server@.service.
+- name: Agent servers, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  block:
+    - name: Create folders for the start script, the units and their settings
+      ansible.builtin.file:
+        path: "{{ agent_home }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - .local/bin
+        - .config/systemd/user
+        - .config/agent-servers
+
+    - name: Install the start script
+      ansible.builtin.copy:
+        src: agent-server
+        dest: "{{ agent_home }}/.local/bin/agent-server"
+        mode: "0755"
+
+    - name: Cap the memory of all agent servers together
+      ansible.builtin.template:
+        src: agents.slice.j2
+        dest: "{{ agent_home }}/.config/systemd/user/agents.slice"
+        mode: "0644"
+
+    - name: Install the agent server unit
+      ansible.builtin.copy:
+        src: agent-server@.service
+        dest: "{{ agent_home }}/.config/systemd/user/agent-server@.service"
+        mode: "0644"
+
+    - name: Write each agent server's settings
+      ansible.builtin.template:
+        src: agent-server.env.j2
+        dest: "{{ agent_home }}/.config/agent-servers/{{ env.name }}.env"
+        mode: "0644"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    - name: List the agent servers set up on the box
+      ansible.builtin.find:
+        paths: "{{ agent_home }}/.config/agent-servers"
+        patterns: "*.env"
+      register: agent_servers_found
+
+    - name: Stop agent servers that are no longer in the settings
+      ansible.builtin.systemd_service:
+        name: agent-server@{{ item }}.service
+        scope: user
+        enabled: false
+        state: stopped
+      loop: "{{ agent_servers_found.files | map(attribute='path') | map('basename') | map('regex_replace', '\\.env$', '') | difference(environments | map(attribute='name')) }}"
+
+    - name: Remove their settings
+      ansible.builtin.file:
+        path: "{{ agent_home }}/.config/agent-servers/{{ item }}.env"
+        state: absent
+      loop: "{{ agent_servers_found.files | map(attribute='path') | map('basename') | map('regex_replace', '\\.env$', '') | difference(environments | map(attribute='name')) }}"
+
+    # Enabled, not started: the very first start of each server has to be by
+    # hand, in a terminal, to answer the folder-trust and Remote Control
+    # prompts. A changed setting takes effect when its server next restarts;
+    # the playbook never restarts one, because that ends its sessions.
+    - name: Start each agent server at every boot
+      ansible.builtin.systemd_service:
+        name: agent-server@{{ item.name }}.service
+        scope: user
+        enabled: true
+        daemon_reload: true
+      loop: "{{ environments }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # An earlier version of the recipe ran the server from this script, under
+    # a unit that is now the daemon's (see the nucleated role).
+    - name: Remove the earlier start script
+      ansible.builtin.file:
+        path: "{{ agent_home }}/bin/start-agents"
+        state: absent

@@ -1,0 +1,21 @@
+[Unit]
+Description=Agent server %i: Claude Code Remote Control over the nucleus (tmux)
+Documentation=https://nucarium.dev
+
+[Service]
+Type=forking
+Slice=agents.slice
+# Capacity, session-name prefix and, for a second login, CLAUDE_CONFIG_DIR.
+EnvironmentFile=%h/.config/agent-servers/%i.env
+# Its own tmux server, so this unit holds exactly this server's processes
+# and is active exactly while the server runs, which is how nucleated tells
+# that it is alive. Look at it with: tmux -L agent-%i attach
+ExecStart=/usr/bin/tmux -L agent-%i new-session -d -s %i %h/.local/bin/agent-server
+ExecStop=/usr/bin/tmux -L agent-%i kill-server
+Restart=always
+RestartSec=15
+# When the memory cap stops one session, the others carry on.
+OOMPolicy=continue
+
+[Install]
+WantedBy=default.target

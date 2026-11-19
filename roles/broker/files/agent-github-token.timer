@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh the agents' GitHub token every 20 minutes
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=20min
+
+[Install]
+WantedBy=timers.target

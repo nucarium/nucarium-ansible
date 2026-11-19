@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly agent backup
+
+[Timer]
+OnCalendar=02:41
+Persistent=true
+
+[Install]
+WantedBy=timers.target

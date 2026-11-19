@@ -1,0 +1,28 @@
+# Written by the playbooks, and full of secrets: out/cidata/ is the
+# unattended-install answers (your password hash and the disk passphrase in
+# the clear), and out/<box>-luks-header.img is the disk-header backup.
+# out/render/ is where tests/render.yml writes.
+out/
+
+# Ansible leftovers
+*.retry
+.ansible/
+
+# Local tooling: the virtual environment the checks run from
+.venv/
+__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# Agent tooling
+.worktrees/
+.claude/worktrees/
+.claude/launch.json

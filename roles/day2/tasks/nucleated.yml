@@ -1,0 +1,131 @@
+---
+# nucleated is the one daemon on the box. Every minute it sends a heartbeat;
+# it forwards session lifecycle events from its hook; and it runs the
+# housekeeping: fetching the repositories, removing finished sessions that
+# hold nothing unsaved, and saving uncommitted work to a hidden ref.
+- name: The box daemon, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+    PATH: "{{ agent_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+  block:
+    - name: Find the jobs the daemon replaces
+      ansible.builtin.stat:
+        path: "{{ agent_home }}/.config/systemd/user/{{ item }}"
+      loop: "{{ day2_retired_units }}"
+      register: day2_retired
+
+    - name: Stop them
+      ansible.builtin.systemd_service:
+        name: "{{ item.item }}"
+        scope: user
+        enabled: false
+        state: stopped
+      loop: "{{ day2_retired.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists
+
+    - name: Remove their units
+      ansible.builtin.file:
+        path: "{{ agent_home }}/.config/systemd/user/{{ item }}"
+        state: absent
+      loop: "{{ day2_retired_units }}"
+
+    - name: Remove their scripts and tokens
+      ansible.builtin.file:
+        path: "{{ agent_home }}/{{ item }}"
+        state: absent
+      loop: "{{ day2_retired_files }}"
+
+    - name: Create folders for the configuration and the unit
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ day2_nucleated_config_file | dirname }}"
+          mode: "0700"
+        - path: "{{ agent_home }}/.config/systemd/user"
+          mode: "0755"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Write the daemon's configuration from the environments
+      ansible.builtin.template:
+        src: nucleated-config.toml.j2
+        dest: "{{ day2_nucleated_config_file }}"
+        mode: "0600"
+
+    - name: Install the daemon's unit
+      ansible.builtin.copy:
+        src: nucleated.service
+        dest: "{{ agent_home }}/.config/systemd/user/nucleated.service"
+        mode: "0644"
+      register: day2_nucleated_unit
+
+    # Exit codes: 0 signed in, 5 not signed in, 6 Watch rejected the stored
+    # token. It prints the machine and the account, never the token.
+    - name: Ask whether the box is signed in to Nucarium Watch
+      ansible.builtin.command: nucleate whoami
+      register: day2_whoami_before
+      changed_when: false
+      failed_when: day2_whoami_before.rc not in [0, 5, 6]
+      when: watch_target == 'hosted'
+
+    # With a token reference in the settings, and only when the box is not
+    # already signed in with a token Watch accepts. The token goes from the
+    # secret store on the workstation straight to the command's standard
+    # input. It is never an argument, never in the log, and never in a file
+    # on the way: pipelining sends the task over the SSH connection instead
+    # of copying it to the box first. nucleate login stores it in a file
+    # only the agent user can read.
+    - name: Store the Nucarium Watch machine token
+      ansible.builtin.command: nucleate login --token-stdin
+      args:
+        stdin: "{{ secrets.watch_machine_token }}"
+        stdin_add_newline: false
+      vars:
+        ansible_pipelining: true
+      no_log: true
+      register: day2_login
+      changed_when: true
+      when:
+        - watch_target == 'hosted'
+        - secrets.watch_machine_token is defined
+        - day2_whoami_before.rc in [5, 6]
+
+    - name: Ask whether Watch accepts the new token
+      ansible.builtin.command: nucleate whoami
+      register: day2_whoami_after
+      changed_when: false
+      failed_when: day2_whoami_after.rc not in [0, 5, 6]
+      when: day2_login is not skipped
+
+    - name: Stop if Watch rejected the token
+      ansible.builtin.assert:
+        that: day2_whoami_after.rc == 0
+        fail_msg: >-
+          Nucarium Watch does not accept the machine token that
+          secret_refs.watch_machine_token points at. Mint a new one in the
+          Watch console and save it there, or empty the reference and run
+          `nucleate login` on the box.
+        quiet: true
+      when: day2_login is not skipped
+
+    - name: Remember the answer for the closing message
+      ansible.builtin.set_fact:
+        day2_watch_whoami: "{{ day2_whoami_after if day2_login is not skipped else day2_whoami_before }}"
+
+    # The daemon reads a new token or a changed configuration by itself, so
+    # only a changed unit needs a restart. That includes the first run on a
+    # box whose nucleated.service was the earlier tmux supervisor: restarting
+    # it stops that supervisor, which ends the sessions it was hosting.
+    - name: Start the daemon now and at every boot
+      ansible.builtin.systemd_service:
+        name: nucleated.service
+        scope: user
+        enabled: true
+        state: "{{ 'restarted' if day2_nucleated_unit is changed else 'started' }}"
+        daemon_reload: true

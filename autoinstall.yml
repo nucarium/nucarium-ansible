@@ -1,0 +1,40 @@
+---
+# Renders the unattended-install config for the second USB stick.
+# Run on your workstation:  ansible-playbook autoinstall.yml
+# Output: out/cidata/user-data and out/cidata/meta-data (both hold secrets).
+- name: Render the Ubuntu autoinstall config
+  hosts: boxes
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    # Your workstation's public SSH key, which the install lets log in.
+    autoinstall_ssh_key_file: ~/.ssh/id_ed25519.pub
+  tasks:
+    - name: Read the sudo password and disk passphrase from 1Password
+      ansible.builtin.set_fact:
+        autoinstall_password: "{{ lookup('ansible.builtin.pipe', 'op read ' ~ (secret_refs.become_password | quote)) }}"
+        autoinstall_passphrase: "{{ lookup('ansible.builtin.pipe', 'op read ' ~ (secret_refs.luks_passphrase | quote)) }}"
+      no_log: true
+
+    - name: Create the output folder
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/out/cidata"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+
+    - name: Render user-data
+      ansible.builtin.template:
+        src: autoinstall/user-data.j2
+        dest: "{{ playbook_dir }}/out/cidata/user-data"
+        mode: "0600"
+      delegate_to: localhost
+      no_log: true
+
+    - name: Write meta-data
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/out/cidata/meta-data"
+        content: "instance-id: {{ inventory_hostname }}-install\n"
+        mode: "0600"
+      delegate_to: localhost

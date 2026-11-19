@@ -1,0 +1,6 @@
+---
+# Every rule of the default (production) profile applies. The two tasks that
+# need an exception carry a "noqa" comment and the reason beside them.
+exclude_paths:
+  - .venv/
+  - out/

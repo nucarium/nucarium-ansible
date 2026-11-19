@@ -1,0 +1,97 @@
+---
+# The nucleus is the workspace folder: bare clones in .repos/, one folder per
+# session in .worktrees/, seed files in .seeds/. nucleate builds and manages
+# it; this role only says where it is and which repositories it offers.
+- name: The nucleus, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    PATH: "{{ agent_home }}/.local/bin:{{ agent_home }}/.local/share/fnm/aliases/default/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
+  block:
+    - name: Create the nucleus
+      ansible.builtin.command: nucleate init --root {{ nucleus_root }}
+      args:
+        creates: "{{ nucleus_root }}/.repos"
+
+    - name: Create the folders the recipe adds to it
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ nucleus_root }}/.seeds"
+        - "{{ nucleus_root }}/.claude"
+        - "{{ agent_home }}/.config/nucleate"
+
+    - name: Point nucleate at the nucleus and the broker's GitHub token
+      ansible.builtin.template:
+        src: nucleate-config.toml.j2
+        dest: "{{ agent_home }}/.config/nucleate/config.toml"
+        mode: "0644"
+
+    - name: Register the worktree hooks at the nucleus root
+      ansible.builtin.copy:
+        src: nucleus-settings.json
+        dest: "{{ nucleus_root }}/.claude/settings.json"
+        mode: "0644"
+
+    - name: Install the nucleus instructions
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/agent-context/AGENTS.md"
+        dest: "{{ nucleus_root }}/AGENTS.md"
+        mode: "0644"
+      when: (playbook_dir ~ '/agent-context/AGENTS.md') is file
+
+    # An entry with a slash names its owner (other-org/tools); a bare name
+    # belongs to github_org. Sessions see each repo under its GitHub slug.
+    - name: Make each repository available
+      ansible.builtin.command: >-
+        nucleate clone
+        https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git
+      args:
+        creates: "{{ nucleus_root }}/.repos/{{ item | basename }}.git"
+      loop: "{{ repos }}"
+
+    - name: Fetch every repository
+      ansible.builtin.command: nucleate refresh
+      changed_when: false
+
+    # User scope, once per Claude login: a session's own folder is
+    # .worktrees/<session>/, where project-level MCP settings are not found.
+    - name: Check whether each login has the nucleate MCP server
+      ansible.builtin.command: claude mcp get nucleate
+      environment: "{{ env_claude }}"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+      register: workspace_mcp
+      changed_when: false
+      failed_when: false
+
+    - name: Drop a registration that points at an earlier nucleate
+      ansible.builtin.command: claude mcp remove --scope user nucleate
+      environment: "{{ env_claude }}"
+      vars:
+        env: "{{ found.env }}"
+      loop: "{{ workspace_mcp.results }}"
+      loop_control:
+        loop_var: found
+        label: "{{ found.env.name }}"
+      changed_when: true
+      when:
+        - found.rc == 0
+        - (agent_home ~ '/.local/bin/nucleate mcp') not in found.stdout
+
+    - name: Register the nucleate MCP server for each login
+      ansible.builtin.command: >-
+        claude mcp add --scope user nucleate -- {{ agent_home }}/.local/bin/nucleate mcp
+      environment: "{{ env_claude }}"
+      vars:
+        env: "{{ found.env }}"
+      loop: "{{ workspace_mcp.results }}"
+      loop_control:
+        loop_var: found
+        label: "{{ found.env.name }}"
+      changed_when: true
+      when: found.rc != 0 or (agent_home ~ '/.local/bin/nucleate mcp') not in found.stdout

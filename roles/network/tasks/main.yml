@@ -1,0 +1,64 @@
+---
+- name: Install Tailscale
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://tailscale.com/install.sh | sh
+  args:
+    executable: /bin/bash
+    creates: /usr/bin/tailscale
+
+- name: Check Tailscale state
+  ansible.builtin.command: tailscale status --json
+  register: network_ts
+  changed_when: false
+  failed_when: false
+
+- name: Join the tailnet with the agent-box tag
+  ansible.builtin.command: >-
+    tailscale up --auth-key={{ secrets.tailscale_auth_key }}
+    --advertise-tags={{ tailscale_tag }} --hostname={{ inventory_hostname }}
+  no_log: true
+  changed_when: true
+  when:
+    - secrets.tailscale_auth_key is defined
+    - network_ts.rc != 0 or (network_ts.stdout | from_json).BackendState != 'Running'
+
+- name: Keep Tailscale itself updated
+  ansible.builtin.command: tailscale set --auto-update
+  changed_when: false
+
+- name: Harden SSH
+  ansible.builtin.copy:
+    src: 10-hardening.conf
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    mode: "0644"
+    validate: sshd -t -f %s
+  notify: Reload SSH
+
+- name: Refuse incoming connections by default
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Allow outgoing connections by default
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Let the tailnet in
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: tailscale0
+
+- name: Keep SSH from the home network as a fallback
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ lan_ssh_cidr }}"
+    port: "22"
+    proto: tcp
+  when: lan_ssh_cidr | length > 0
+
+- name: Turn the firewall on
+  community.general.ufw:
+    state: enabled

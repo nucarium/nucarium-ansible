@@ -1,0 +1,77 @@
+{
+  "autoUpdatesChannel": "stable",
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "failIfUnavailable": true,
+    "excludedCommands": ["podman"],
+    "network": {
+      "allowedDomains": [
+        "github.com", "api.github.com", "*.githubusercontent.com",
+        "npm.pkg.github.com", "registry.npmjs.org",
+        "proxy.golang.org", "sum.golang.org", "go.dev",
+        "app.terraform.io", "registry.terraform.io", "releases.hashicorp.com"
+      ]
+    }
+  },
+  "permissions": {
+    "deny": [
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(terraform force-unlock *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.claude/hooks/session-env.sh", "timeout": 10 },
+          { "type": "command", "command": "{{ claude_nucleated_hook }} SessionStart --env {{ env.name }}", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{ claude_nucleated_hook }} UserPromptSubmit --env {{ env.name }}", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "{{ claude_nucleated_notifications | join('|') }}",
+        "hooks": [
+          { "type": "command", "command": "{{ claude_nucleated_hook }} Notification --env {{ env.name }}", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{ claude_nucleated_hook }} PostToolUse --env {{ env.name }}", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{ claude_nucleated_hook }} Stop --env {{ env.name }}", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{ claude_nucleated_hook }} StopFailure --env {{ env.name }}", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{ claude_nucleated_hook }} SessionEnd --env {{ env.name }}", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

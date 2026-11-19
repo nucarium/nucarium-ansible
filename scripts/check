@@ -1,0 +1,36 @@
+#!/bin/sh
+# Every check this recipe has, none of which needs a box. The Build workflow
+# runs this same script.
+#
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+#   PATH="$PWD/.venv/bin:$PATH" scripts/check
+set -eu
+cd "$(dirname "$0")/.."
+
+# Every shell script in the recipe, this one included.
+shell_files="
+  scripts/check
+  roles/agent_servers/files/agent-server
+  roles/claude/files/session-env.sh
+  roles/claude/files/terraform-credentials-agentvault
+  roles/day2/files/agent-gc
+"
+
+echo "== syntax"
+ansible-playbook --syntax-check site.yml autoinstall.yml tests/render.yml
+
+echo "== ansible-lint"
+ansible-lint
+
+echo "== yamllint"
+yamllint .
+
+echo "== shellcheck"
+# shellcheck disable=SC2086  # the list is split into file names on purpose
+shellcheck $shell_files
+
+echo "== render the templates from the example settings, in two shapes"
+ansible-playbook tests/render.yml
+ansible-playbook tests/render.yml -e @tests/two-logins.yml
+
+echo "== all checks passed"

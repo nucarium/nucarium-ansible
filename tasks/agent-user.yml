@@ -1,0 +1,15 @@
+---
+# Looks up the agent user's id and home folder, which most roles need. Run
+# before the roles (the user exists on every run after the first) and again
+# by the users role once it has created the user.
+- name: Look up the agent user
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ agent_user }}"
+    fail_key: false
+
+- name: Remember the agent user's id and home folder
+  ansible.builtin.set_fact:
+    agent_uid: "{{ ansible_facts.getent_passwd[agent_user][1] }}"
+    agent_home: "{{ ansible_facts.getent_passwd[agent_user][4] }}"
+  when: ansible_facts.getent_passwd[agent_user] is truthy

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Runs one agent server: Claude Code's Remote Control server, started in the
+# nucleus so every session it spawns gets its own folder there.
+#
+# agent-server-<name>.service starts this inside tmux and starts it again
+# when it exits, which the server does by design after about ten minutes
+# without a connection.
+set -euo pipefail
+
+: "${AGENT_SERVER_ROOT:?set by the service}"
+: "${AGENT_SERVER_CAPACITY:?set by the service}"
+: "${AGENT_SERVER_PREFIX:?set by the service}"
+
+export PATH="$HOME/.local/bin:$HOME/.local/share/fnm/aliases/default/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
+
+# After a power cut the box boots faster than the router, and a user service
+# cannot ask systemd to wait for the network.
+until curl -s -o /dev/null --max-time 5 https://api.anthropic.com/; do
+  sleep 5
+done
+
+cd "$AGENT_SERVER_ROOT"
+exec claude remote-control \
+  --spawn worktree \
+  --no-create-session-in-dir \
+  --no-chrome \
+  --capacity "$AGENT_SERVER_CAPACITY" \
+  --remote-control-session-name-prefix "$AGENT_SERVER_PREFIX"

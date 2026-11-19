@@ -1,0 +1,126 @@
+---
+# Runs before anything reboots the box: until the TPM holds the disk key, a
+# reboot stops at a passphrase prompt on the console.
+
+- name: Find the encrypted partition
+  ansible.builtin.shell: |
+    set -o pipefail
+    lsblk -rno NAME,FSTYPE | awk '$2 == "crypto_LUKS" { print $1; exit }'
+  args:
+    executable: /bin/bash
+  register: tpm_luks
+  changed_when: false
+  failed_when: tpm_luks.stdout == ""
+
+- name: Check which boot-image builder this system uses
+  ansible.builtin.stat:
+    path: /usr/bin/dracut
+  register: tpm_dracut
+
+- name: Install Clevis
+  ansible.builtin.apt:
+    name:
+      - clevis
+      - clevis-tpm2
+      - clevis-luks
+      - "{{ 'clevis-dracut' if tpm_dracut.stat.exists else 'clevis-initramfs' }}"
+    state: present
+
+- name: List existing bindings
+  ansible.builtin.command: clevis luks list -d /dev/{{ tpm_luks.stdout }}
+  register: tpm_bindings
+  changed_when: false
+
+- name: Bind the disk key to the TPM
+  ansible.builtin.command: >-
+    clevis luks bind -y -k - -d /dev/{{ tpm_luks.stdout }} tpm2 '{"pcr_ids":"7"}'
+  args:
+    stdin: "{{ secrets.luks_passphrase }}"
+    stdin_add_newline: false
+  no_log: true
+  register: tpm_bind
+  changed_when: true
+  when: "'tpm2' not in tpm_bindings.stdout"
+  notify: Rebuild the boot image
+
+- name: Check for a saved disk-header backup on the workstation
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/out/{{ inventory_hostname }}-luks-header.img"
+  delegate_to: localhost
+  become: false
+  register: tpm_header_local
+
+- name: Back up the disk header
+  when: not tpm_header_local.stat.exists
+  block:
+    - name: Write the header backup
+      ansible.builtin.command: >-
+        cryptsetup luksHeaderBackup /dev/{{ tpm_luks.stdout }}
+        --header-backup-file /root/luks-header.img
+      args:
+        creates: /root/luks-header.img
+
+    - name: Fetch the header backup to the workstation
+      ansible.builtin.fetch:
+        src: /root/luks-header.img
+        dest: "{{ playbook_dir }}/out/{{ inventory_hostname }}-luks-header.img"
+        flat: true
+
+    - name: Remove the header backup from the box
+      ansible.builtin.file:
+        path: /root/luks-header.img
+        state: absent
+
+- name: Boot-menu password
+  when: secrets.grub_password is defined
+  block:
+    - name: Let normal boot entries start without the password
+      ansible.builtin.replace:
+        path: /etc/grub.d/10_linux
+        regexp: '(--class os)"'
+        replace: '\1 --unrestricted"'
+      notify: Update the boot menu
+
+    - name: Confirm the entries are unrestricted before setting a password
+      ansible.builtin.command: grep -c -- --unrestricted /etc/grub.d/10_linux
+      changed_when: false
+
+    - name: Check whether a password is already set
+      ansible.builtin.command: grep -c password_pbkdf2 /etc/grub.d/40_custom
+      register: tpm_grub_set
+      changed_when: false
+      failed_when: false
+
+    - name: Hash the boot-menu password
+      ansible.builtin.shell: |
+        set -o pipefail
+        grub-mkpasswd-pbkdf2 | awk '/grub.pbkdf2/ { print $NF }'
+      args:
+        executable: /bin/bash
+        stdin: "{{ secrets.grub_password }}\n{{ secrets.grub_password }}"
+      no_log: true
+      register: tpm_grub_hash
+      changed_when: false
+      when: tpm_grub_set.stdout == "0"
+
+    - name: Set the boot-menu password
+      ansible.builtin.blockinfile:
+        path: /etc/grub.d/40_custom
+        block: |
+          set superusers="admin"
+          password_pbkdf2 admin {{ tpm_grub_hash.stdout }}
+      when: tpm_grub_set.stdout == "0"
+      notify: Update the boot menu
+
+- name: Apply boot changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Check whether a reboot is waiting
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: tpm_reboot_required
+
+- name: Reboot (the first unattended unlock is the test of the TPM binding)
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+  when: tpm_bind is changed or tpm_reboot_required.stat.exists

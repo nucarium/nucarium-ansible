@@ -1,0 +1,17 @@
+---
+# nucleated's hook entry point, registered as `nucleated hooks print --env
+# <name>` prints it. It writes an allowlist of fields to a local spool, prints
+# nothing and exits 0 within two seconds whatever happens, so it can never
+# hold a session up. SessionEnd alone is not async, so the event is written
+# before the session's process goes away.
+claude_nucleated_hook: $HOME/.local/bin/nucleated hook
+
+# The notifications that change what a session is waiting for.
+claude_nucleated_notifications:
+  - permission_prompt
+  - idle_prompt
+  - agent_needs_input
+  - elicitation_dialog
+  - elicitation_url_dialog
+  - elicitation_complete
+  - elicitation_response

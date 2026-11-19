@@ -1,0 +1,53 @@
+---
+# Install NUT before the UPS's USB cable is plugged in: its udev rule only
+# applies to devices connected afterwards. If the cable is already in, the
+# trigger task below re-applies the rule.
+
+- name: Install NUT
+  ansible.builtin.apt:
+    name: nut
+    state: present
+  register: nut_install
+
+# Done here, not in a handler: the driver needs the permission before the
+# configuration below restarts it.
+- name: Re-apply USB permissions for an already-connected UPS  # noqa: no-handler
+  ansible.builtin.command: udevadm trigger --subsystem-match=usb
+  changed_when: true
+  when: nut_install is changed
+
+- name: Create the monitor password once
+  ansible.builtin.shell: |
+    umask 077
+    openssl rand -hex 16 > /etc/nut/.upsmon-password
+  args:
+    creates: /etc/nut/.upsmon-password
+
+- name: Read the monitor password
+  ansible.builtin.slurp:
+    src: /etc/nut/.upsmon-password
+  register: nut_password
+  no_log: true
+
+- name: Standalone mode
+  ansible.builtin.copy:
+    dest: /etc/nut/nut.conf
+    content: "MODE=standalone\n"
+    owner: root
+    group: nut
+    mode: "0640"
+  notify: Restart NUT
+
+- name: Configure the UPS, its user and the monitor
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: /etc/nut/{{ item }}
+    owner: root
+    group: nut
+    mode: "0640"
+  loop:
+    - ups.conf
+    - upsd.users
+    - upsmon.conf
+  no_log: true
+  notify: Restart NUT

@@ -1,0 +1,6 @@
+[Unit]
+Description=Weekly agent disk cleanup
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/agent-gc

@@ -1,0 +1,213 @@
+---
+# Settings for the Nucarium box recipe. Everything that differs between boxes
+# lives in this file and in inventory.ini.
+#
+# Nothing secret is stored here. secret_refs, at the end, holds 1Password
+# references; the values are read on your workstation with `op read` when a
+# playbook runs.
+
+# ---------------------------------------------------------------------------
+# People
+# ---------------------------------------------------------------------------
+
+# Your own user on the box: the account you log in and use sudo with. The
+# unattended install creates it. Lower-case letters and digits.
+operator_user: ops
+
+# The user the agents run as. It has no sudo and none of your credentials.
+# There is rarely a reason to change it.
+agent_user: agent
+
+# The box's time zone, as a tz database name (Europe/Berlin, America/Chicago).
+# Timers such as the nightly backup run in this zone.
+timezone: Etc/UTC
+
+# ---------------------------------------------------------------------------
+# Network
+# ---------------------------------------------------------------------------
+
+# Your home or office network's address range, in CIDR form. SSH from this
+# range stays allowed as a fallback beside Tailscale. Set it to "" to allow
+# SSH over Tailscale only; do that once Tailscale is proven.
+lan_ssh_cidr: 192.168.1.0/24
+
+# The Tailscale tag the box joins your tailnet with. The tag must exist in
+# your tailnet's access controls, where it stops the box opening connections
+# to your other devices.
+tailscale_tag: tag:agent-box
+
+# ---------------------------------------------------------------------------
+# GitHub
+# ---------------------------------------------------------------------------
+
+# The name and email on the agents' commits. The email must be verified on
+# your GitHub account, or the commits do not show as Verified.
+git_user_name: Your Name
+git_user_email: you@example.com
+
+# The GitHub organisation (or user) that owns your repositories. Also the
+# scope of the packages the box may download from GitHub Packages.
+github_org: your-org
+
+# The repositories agents can add to a session. A bare name is a repository
+# in github_org; write owner/name for one that lives elsewhere. Each is
+# cloned bare into the nucleus, and sessions see it under its GitHub name
+# (your-org/web). The agents' GitHub App must be installed on every one.
+repos:
+  - web
+  - api
+
+# The GitHub App the agents push and open pull requests through. Both values
+# are on the app's settings pages and neither is secret: the client ID starts
+# with "Iv", and the installation ID is the number at the end of the
+# installation's address (…/installations/<id>). Keep the quotes.
+github_app_client_id: Iv23example
+github_app_installation_id: "12345678"
+
+# ---------------------------------------------------------------------------
+# Environments
+# ---------------------------------------------------------------------------
+
+# One entry per Claude login. Each is an environment: one login running one
+# agent server (Claude Code's Remote Control server) over the nucleus, shown
+# as one environment in Nucarium Watch. Most boxes have one. Add an entry to
+# run a second login of the same organisation on this box. Environments on
+# one box are not isolated from each other: they share the agent user, the
+# nucleus, its repositories and the GitHub App. Work for a different
+# organisation belongs on its own box.
+#
+#   name        A short label: lower-case letters, digits and hyphens. It
+#               names the service (agent-server@<name>), prefixes session
+#               names (<box>-<name>-…), and names the environment in Watch.
+#   config_dir  The full path of the folder that holds this login's Claude
+#               configuration. Left out, it is ~/.claude in the agent user's
+#               home, which is right for the first login. A second login
+#               needs its own, for example /home/agent/.claude-second.
+#   capacity    The most sessions this environment runs at once. Left out,
+#               it is 12, which suits 64 GB.
+environments:
+  - name: main
+    capacity: 12
+
+# A memory cap on all agent servers and their sessions together, so a runaway
+# build cannot take the box, SSH and Tailscale down with it. Above the first
+# figure sessions are slowed; at the second the largest is stopped. These
+# suit 64 GB; raise both if the box has more.
+agents_memory_high: 48G
+agents_memory_max: 56G
+
+# ---------------------------------------------------------------------------
+# Nucarium Watch
+# ---------------------------------------------------------------------------
+
+# Where the box reports: Nucarium Watch (app.nucarium.com), which tells you
+# when an agent needs you or the box goes dark, or nowhere. Watch receives
+# metadata only: which agent is doing what, where and since when, never what
+# it was told or what it wrote.
+#
+#   hosted  Report to Watch. Nothing is sent until the box is signed in. To
+#           sign it in, either run `nucleate login` on it afterwards and
+#           approve the code it shows from your phone, or mint a machine
+#           token in the Watch console, save it in 1Password and put its
+#           reference in secret_refs.watch_machine_token below.
+#   none    Report nowhere, even if the box is signed in. `nucleated status`
+#           on the box shows the same view.
+watch_target: hosted
+
+# ---------------------------------------------------------------------------
+# UPS
+# ---------------------------------------------------------------------------
+
+# Whether a UPS is connected to the box by USB. Set it to false on a box with
+# none (a virtual machine, say); the rest of this section is then ignored.
+nut_enabled: true
+
+# A short name for the UPS, used in commands such as `upsc ups`.
+ups_name: ups
+
+# A description of the UPS, for your own reference.
+ups_description: CyberPower VP700ELCD
+
+# Shut the box down when the battery falls to this charge (percent) or this
+# much runtime (seconds), whichever comes first.
+ups_charge_low: 40
+ups_runtime_low: 600
+
+# After the shutdown starts, the UPS switches its outlets off after
+# ups_offdelay seconds and back on after ups_ondelay seconds, which is what
+# restarts the box. Many UPS models count these in whole minutes.
+ups_offdelay: 60
+ups_ondelay: 120
+
+# ---------------------------------------------------------------------------
+# Tools on the box
+# ---------------------------------------------------------------------------
+
+# The release of nucleate (the workspace CLI) and nucleated (the box daemon)
+# to install, from github.com/nucarium/nucarium-cli, and the SHA-256 of its Linux
+# archive as published beside it on the releases page. The download is
+# refused unless it matches. Change both together.
+nucleate_version: "0.1.0"
+nucleate_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+
+# For testing a build of your own: the path, on your workstation, of a
+# .tar.gz holding the two binaries, nucleate and nucleated, at its top level.
+# When set, it is installed instead of the release above and no checksum is
+# checked.
+nucleate_local_archive: ""
+
+# The Go and Node versions to install for the agents. Go downloads a newer
+# toolchain by itself when a repository asks for one.
+go_version: "1.27.1"
+node_version: "24"
+
+# HCP Terraform token for local module downloads:
+#   none   No Terraform on this box.
+#   file   The token is read from secret_refs.hcp_token when the playbook
+#          runs and kept on the box by the token broker.
+#   vault  The box reads secret_refs.hcp_token from 1Password every 20
+#          minutes, using the service-account token in
+#          secret_refs.vault_read_token. Use this when several boxes share
+#          one token.
+hcp_mode: none
+
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+
+# 1Password references (op://vault/item/field), read on your workstation.
+# The vault, item and field names are examples: point them at your own
+# items. Leave a value empty to skip that feature.
+#
+#   become_password          Your sudo password on the box.
+#   luks_passphrase          The disk-encryption passphrase.
+#   grub_password            The boot-menu password. Empty: none is set.
+#   tailscale_auth_key       A pre-approved, tagged, non-ephemeral auth key.
+#   ubuntu_pro_token         Ubuntu Pro, for kernel fixes without a reboot.
+#   github_app_pem           The GitHub App's private key (.pem file).
+#   npm_token                A classic token with only read:packages.
+#   hcp_token                See hcp_mode.
+#   vault_read_token         See hcp_mode.
+#   watch_machine_token      A Nucarium Watch machine token, minted in the
+#                            Watch console. Empty: run `nucleate login` on
+#                            the box instead.
+#   restic_repository        The nightly backup's bucket, as a restic
+#                            repository (s3:https://…). Empty: no backup.
+#   restic_password          The backup's encryption password.
+#   restic_access_key_id     The bucket's access key.
+#   restic_secret_access_key The bucket's secret key.
+secret_refs:
+  become_password: op://Infra/agentbox/sudo-password
+  luks_passphrase: op://Infra/agentbox/disk-passphrase
+  grub_password: op://Infra/agentbox/boot-menu-password
+  tailscale_auth_key: op://Infra/agentbox/tailscale-auth-key
+  ubuntu_pro_token: ""
+  github_app_pem: op://Infra/agentbox/github-app-private-key.pem
+  npm_token: op://Infra/agentbox/npm-read-packages-token
+  hcp_token: ""
+  vault_read_token: ""
+  watch_machine_token: ""
+  restic_repository: ""
+  restic_password: ""
+  restic_access_key_id: ""
+  restic_secret_access_key: ""

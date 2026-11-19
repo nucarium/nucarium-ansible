@@ -1,0 +1,176 @@
+---
+- name: Create the keyring folder
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add the GitHub CLI signing key
+  ansible.builtin.get_url:
+    url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    dest: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    mode: "0644"
+
+- name: Add the GitHub CLI package source
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64 signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg]
+      https://cli.github.com/packages stable main
+    filename: github-cli
+
+- name: Install the GitHub CLI
+  ansible.builtin.apt:
+    name: gh
+    state: present
+
+- name: Terraform and the vault CLI
+  when: hcp_mode != 'none'
+  block:
+    - name: Add the HashiCorp and 1Password signing keys
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: /etc/apt/keyrings/{{ item.name }}.asc
+        mode: "0644"
+      loop:
+        - name: hashicorp
+          url: https://apt.releases.hashicorp.com/gpg
+        - name: 1password
+          url: https://downloads.1password.com/linux/keys/1password.asc
+
+    - name: Add the HashiCorp package source
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/hashicorp.asc]
+          https://apt.releases.hashicorp.com {{ ansible_facts.distribution_release }} main
+        filename: hashicorp
+
+    - name: Install Terraform
+      ansible.builtin.apt:
+        name: terraform
+        state: present
+
+    - name: Add the 1Password package source
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/1password.asc]
+          https://downloads.1password.com/linux/debian/amd64 stable main
+        filename: 1password
+      when: hcp_mode == 'vault'
+
+    - name: Install the 1Password CLI
+      ansible.builtin.apt:
+        name: 1password-cli
+        state: present
+      when: hcp_mode == 'vault'
+
+- name: Check the installed Go version
+  ansible.builtin.command: /usr/local/go/bin/go version
+  register: toolchain_go
+  changed_when: false
+  failed_when: false
+
+- name: Install Go
+  when: ('go' ~ go_version ~ ' ') not in (toolchain_go.stdout | default(''))
+  block:
+    - name: Remove the old Go
+      ansible.builtin.file:
+        path: /usr/local/go
+        state: absent
+
+    - name: Unpack Go
+      ansible.builtin.unarchive:
+        src: https://go.dev/dl/go{{ go_version }}.linux-amd64.tar.gz
+        dest: /usr/local
+        remote_src: true
+
+- name: Agent user's toolchain
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    PATH: "{{ agent_home }}/.local/bin:{{ agent_home }}/.local/share/fnm/aliases/default/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  block:
+    - name: Install fnm without letting it edit the shell setup
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+      args:
+        executable: /bin/bash
+        creates: "{{ agent_home }}/.local/share/fnm/fnm"
+
+    - name: Set PATH at the top of .bashrc (SSH, tmux and Desktop sessions)
+      ansible.builtin.blockinfile:
+        path: "{{ agent_home }}/.bashrc"
+        insertbefore: BOF
+        marker: "# {mark} agent box PATH"
+        block: |
+          export PATH="$HOME/.local/bin:$HOME/.local/share/fnm/aliases/default/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
+          export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
+    - name: Create the environment.d folder
+      ansible.builtin.file:
+        path: "{{ agent_home }}/.config/environment.d"
+        state: directory
+        mode: "0755"
+
+    - name: Set PATH for services and timers
+      ansible.builtin.copy:
+        dest: "{{ agent_home }}/.config/environment.d/10-path.conf"
+        content: |
+          PATH={{ agent_home }}/.local/bin:{{ agent_home }}/.local/share/fnm/aliases/default/bin:/usr/local/go/bin:{{ agent_home }}/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+        mode: "0644"
+
+    - name: Install Node
+      ansible.builtin.shell: |
+        {{ agent_home }}/.local/share/fnm/fnm install {{ node_version }}
+        {{ agent_home }}/.local/share/fnm/fnm default {{ node_version }}
+      args:
+        creates: "{{ agent_home }}/.local/share/fnm/aliases/default/bin/node"
+
+    - name: Enable pnpm
+      ansible.builtin.command: corepack enable pnpm
+      args:
+        creates: "{{ agent_home }}/.local/share/fnm/aliases/default/bin/pnpm"
+
+    - name: Create the commit-signing key
+      ansible.builtin.command: >-
+        ssh-keygen -t ed25519 -C "{{ inventory_hostname }} agent signing" -N ""
+        -f {{ agent_home }}/.ssh/id_ed25519_signing
+      args:
+        creates: "{{ agent_home }}/.ssh/id_ed25519_signing"
+
+    - name: Set the Git identity, signing and GitHub credential helper
+      community.general.git_config:
+        scope: global
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+      loop:
+        - name: user.name
+          value: "{{ git_user_name }}"
+        - name: user.email
+          value: "{{ git_user_email }}"
+        - name: gpg.format
+          value: ssh
+        - name: user.signingkey
+          value: "{{ agent_home }}/.ssh/id_ed25519_signing.pub"
+        - name: commit.gpgsign
+          value: "true"
+        - name: tag.gpgsign
+          value: "true"
+        - name: credential.https://github.com.helper
+          value: >-
+            !f() { [ "$1" = get ] && printf "username=x-access-token\npassword=%s\n"
+            "$(cat /run/agent-tokens/github)"; }; f
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Install the GitHub Packages token (download-only)
+      ansible.builtin.copy:
+        dest: "{{ agent_home }}/.npmrc"
+        content: |
+          @{{ github_org }}:registry=https://npm.pkg.github.com
+          //npm.pkg.github.com/:_authToken={{ secrets.npm_token }}
+        mode: "0600"
+      no_log: true
+      when: secrets.npm_token is defined

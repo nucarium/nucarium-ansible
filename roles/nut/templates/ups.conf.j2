@@ -1,0 +1,9 @@
+[{{ ups_name }}]
+  driver = usbhid-ups
+  port = auto
+  desc = "{{ ups_description }}"
+  ignorelb
+  override.battery.charge.low = {{ ups_charge_low }}
+  override.battery.runtime.low = {{ ups_runtime_low }}
+  offdelay = {{ ups_offdelay }}
+  ondelay = {{ ups_ondelay }}

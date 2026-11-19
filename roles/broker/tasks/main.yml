@@ -1,0 +1,94 @@
+---
+# The broker user holds the long-lived secrets. Agents only ever see the
+# short-lived tokens it writes to /run/agent-tokens.
+
+- name: GitHub App token
+  when: secrets.github_app_pem is defined
+  block:
+    - name: Install the GitHub App private key
+      ansible.builtin.copy:
+        dest: /etc/agent-broker/github-app.pem
+        content: "{{ secrets.github_app_pem | trim }}\n"
+        owner: broker
+        group: broker
+        mode: "0600"
+      no_log: true
+
+    - name: Install the token minter
+      ansible.builtin.template:
+        src: agent-github-token.j2
+        dest: /usr/local/sbin/agent-github-token
+        mode: "0755"
+
+    - name: Install the minter's service and timer
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: /etc/systemd/system/{{ item }}
+        mode: "0644"
+      loop:
+        - agent-github-token.service
+        - agent-github-token.timer
+
+    - name: Start the 20-minute refresh
+      ansible.builtin.systemd_service:
+        name: agent-github-token.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Mint a token now
+      ansible.builtin.systemd_service:
+        name: agent-github-token.service
+        state: started
+      changed_when: false
+
+- name: HCP Terraform token
+  when: hcp_mode != 'none'
+  block:
+    - name: Install the vault read credential
+      ansible.builtin.copy:
+        dest: /etc/agent-broker/vault-read-token
+        content: "{{ secrets.vault_read_token }}"
+        owner: broker
+        group: broker
+        mode: "0600"
+      no_log: true
+      when: hcp_mode == 'vault'
+
+    - name: Install the HCP token itself
+      ansible.builtin.copy:
+        dest: /etc/agent-broker/hcp-token
+        content: "{{ secrets.hcp_token }}"
+        owner: broker
+        group: broker
+        mode: "0600"
+      no_log: true
+      when: hcp_mode == 'file'
+
+    - name: Install the token fetcher
+      ansible.builtin.template:
+        src: agent-hcp-token.j2
+        dest: /usr/local/sbin/agent-hcp-token
+        mode: "0755"
+
+    - name: Install the fetcher's service and timer
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: /etc/systemd/system/{{ item }}
+        mode: "0644"
+      loop:
+        - agent-hcp-token.service
+        - agent-hcp-token.timer
+
+    - name: Start the 20-minute refresh
+      ansible.builtin.systemd_service:
+        name: agent-hcp-token.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Fetch a token now
+      ansible.builtin.systemd_service:
+        name: agent-hcp-token.service
+        state: started
+      changed_when: false

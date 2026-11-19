@@ -1,0 +1,36 @@
+The box is built. What is left needs you in person:
+
+1. Register the signing key on GitHub, from your workstation:
+     gh auth refresh -h github.com -s admin:ssh_signing_key
+     ssh {{ agent_user }}@{{ inventory_hostname }} cat .ssh/id_ed25519_signing.pub > {{ inventory_hostname }}-signing.pub
+     gh ssh-key add {{ inventory_hostname }}-signing.pub --type signing --title "{{ inventory_hostname }} agent signing"
+
+2. Sign each agent server in to Claude and start it once by hand, as {{ agent_user }} on the box. The first start asks questions a service cannot answer: answer y to trust the folder and to enable Remote Control, wait until it says it is connected, press Ctrl+C, then hand over to the service.
+{% for server in environments %}
+{% set dir = server.config_dir | default(agent_home ~ '/.claude') %}
+{% set env = 'CLAUDE_CONFIG_DIR=' ~ dir ~ ' ' if dir != agent_home ~ '/.claude' else '' %}
+   {{ server.name }}:
+     {{ env }}claude
+       (sign in, run /mcp and authorise each connector that asks, then /exit)
+     cd {{ nucleus_root }} && {{ env }}claude remote-control --spawn worktree --no-create-session-in-dir --no-chrome
+     systemctl --user start agent-server@{{ server.name }}.service
+{% endfor %}
+
+{% set whoami = day2_watch_whoami | default({}) %}
+{% if watch_target == 'none' %}
+3. Nucarium Watch is off (watch_target: none), so nothing leaves the box. To see what Watch would show, as {{ agent_user }} on the box:
+     nucleated status
+{% elif whoami.rc | default(5) == 0 %}
+{% set login = whoami.stdout | from_json %}
+3. Nucarium Watch: this box is signed in as "{{ login.machine_name | default(inventory_hostname) }}" and reports to {{ login.account_name | default('your account') }}. It appears at {{ watch_console_url }} within a minute.
+{% else %}
+3. {{ 'Nucarium Watch no longer accepts this box\'s token. Sign it in again' if whoami.rc | default(5) == 6 else 'Sign the box in to Nucarium Watch' }}, as {{ agent_user }} on the box:
+     nucleate login
+   It prints a short code such as WDJB-MJHT, the address {{ watch_console_url }}/activate and a link that already carries the code, then waits. Open either on your phone or laptop, sign in, choose this machine or name a new one, and approve. The code lasts 15 minutes. The box then says what was granted, "{{ inventory_hostname }} can now report to <your account>. It can read nothing.", and appears in Watch within a minute. Watch sees which agent is doing what, where and since when, never what it was told or what it wrote.
+{% endif %}
+
+4. Check the daemon, as {{ agent_user }} on the box:
+     nucleated check
+     nucleated status
+
+5. The disk-header backup is on your workstation in out/{{ inventory_hostname }}-luks-header.img. Attach it to the disk passphrase in your password manager, then delete the file.

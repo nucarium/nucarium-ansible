@@ -1,0 +1,8 @@
+[Unit]
+Description=Every agent server and its sessions
+
+[Slice]
+# One cap for all of them together, so a runaway build is stopped inside this
+# group and the system, SSH and Tailscale keep running.
+MemoryHigh={{ agents_memory_high }}
+MemoryMax={{ agents_memory_max }}

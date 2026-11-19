@@ -1,0 +1,90 @@
+---
+- name: Claude Code for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  block:
+    - name: Install Claude Code
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://claude.ai/install.sh | bash
+      args:
+        executable: /bin/bash
+        creates: "{{ agent_home }}/.local/bin/claude"
+
+    - name: Create the folder for hooks
+      ansible.builtin.file:
+        path: "{{ agent_home }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - .claude
+        - .claude/hooks
+
+    # One configuration folder per Claude login: ~/.claude for the first
+    # environment, and each other environment's config_dir.
+    - name: Create each login's configuration folder
+      ansible.builtin.file:
+        path: "{{ env_config_dir }}/skills"
+        state: directory
+        mode: "0755"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    - name: Install the session-environment hook (GitHub token rule)
+      ansible.builtin.copy:
+        src: session-env.sh
+        dest: "{{ agent_home }}/.claude/hooks/session-env.sh"
+        mode: "0755"
+
+    - name: Install each login's settings (sandbox, update channel, deny rules, hooks)
+      ansible.builtin.template:
+        src: settings.json.j2
+        dest: "{{ env_config_dir }}/settings.json"
+        mode: "0644"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    - name: Install the Terraform credentials helper
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ agent_home }}/{{ item.dest }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - src: terraform-credentials-agentvault
+          dest: .terraform.d/plugins/terraform-credentials-agentvault
+          mode: "0755"
+        - src: terraformrc
+          dest: .terraformrc
+          mode: "0644"
+      loop_control:
+        label: "{{ item.dest }}"
+      when: hcp_mode != 'none'
+
+    # Optional context for the agents, kept in agent-context/ beside the
+    # playbook. AGENTS.md is installed by the workspace role, once the
+    # nucleus exists.
+    - name: Install the agent user's own instructions for each login
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/agent-context/CLAUDE.md"
+        dest: "{{ env_config_dir }}/CLAUDE.md"
+        mode: "0644"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+      when: (playbook_dir ~ '/agent-context/CLAUDE.md') is file
+
+    - name: Install skills for each login
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/agent-context/skills/"
+        dest: "{{ env_config_dir }}/skills/"
+        mode: preserve
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+      when: (playbook_dir ~ '/agent-context/skills') is directory

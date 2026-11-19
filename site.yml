@@ -1,0 +1,111 @@
+---
+# Builds a Nucarium box from a fresh Ubuntu Server install.
+# Run on your workstation:  ansible-playbook site.yml
+# One part only:            ansible-playbook site.yml --tags day2
+- name: Build a Nucarium box
+  hosts: boxes
+  gather_facts: false
+  become: false
+
+  vars:
+    # The nucleus: bare clones in .repos/, sessions in .worktrees/, seed
+    # files in .seeds/. nucleate manages it; nucleated watches it.
+    nucleus_root: "{{ agent_home }}/workspace"
+    # One environment's Claude configuration folder, and the variable that
+    # points Claude Code at it. Both are worked out inside a loop over
+    # environments whose loop variable is env. The first login uses ~/.claude
+    # and needs no variable.
+    env_config_dir: "{{ env.config_dir | default(agent_home ~ '/.claude') }}"
+    env_claude: "{{ {} if env_config_dir == agent_home ~ '/.claude' else {'CLAUDE_CONFIG_DIR': env_config_dir} }}"
+    # Nucarium Watch is hosted only, so its address is not a setting.
+    watch_console_url: https://app.nucarium.com
+
+  pre_tasks:
+    - name: Check the settings
+      ansible.builtin.assert:
+        that:
+          - environments | length > 0
+          - environments | map(attribute='name') | unique | length == environments | length
+          - environments | map(attribute='name') | select('match', '^[a-z0-9][a-z0-9-]*$') | length == environments | length
+          - environments | map(attribute='config_dir', default='') | unique | length == environments | length
+          - environments | map(attribute='config_dir', default='/') | select('match', '^/') | length == environments | length
+          - watch_target in ['hosted', 'none']
+          - hcp_mode in ['none', 'file', 'vault']
+          - hcp_mode == 'none' or secret_refs.hcp_token | length > 0
+          - hcp_mode != 'vault' or secret_refs.vault_read_token | length > 0
+        fail_msg: >-
+          group_vars/all.yml: environments needs at least one entry, each
+          with its own name (lower-case letters, digits and hyphens) and its
+          own config_dir (a full path, or left out for the first login); watch_target is hosted or none; hcp_mode is none,
+          file or vault, and file and vault need secret_refs.hcp_token (vault
+          also secret_refs.vault_read_token).
+        quiet: true
+      tags: always
+
+    - name: Read secrets from 1Password on the workstation
+      ansible.builtin.set_fact:
+        secrets: "{{ secrets | default({}) | combine({item.key: lookup('ansible.builtin.pipe', 'op read ' ~ (item.value | quote))}) }}"
+      loop: "{{ secret_refs | dict2items | selectattr('value') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+      no_log: true
+      tags: always
+
+    - name: Use the vault's sudo password
+      ansible.builtin.set_fact:
+        ansible_become_password: "{{ secrets.become_password }}"
+      when: secrets.become_password is defined
+      no_log: true
+      tags: always
+
+    - name: Gather facts
+      ansible.builtin.setup:
+      tags: always
+
+    # The users role creates the agent user. On a run of one part (--tags)
+    # that role is skipped, so the lookup happens here too.
+    - name: Look up the agent user, if it exists yet
+      ansible.builtin.import_tasks: tasks/agent-user.yml
+      tags: always
+
+  roles:
+    - role: base
+      become: true
+      tags: base
+    - role: tpm
+      become: true
+      tags: tpm
+    - role: network
+      become: true
+      tags: network
+    - role: nut
+      become: true
+      when: nut_enabled
+      tags: nut
+    - role: users
+      become: true
+      tags: users
+    - role: toolchain
+      become: true
+      tags: toolchain
+    - role: broker
+      become: true
+      tags: broker
+    - role: claude
+      become: true
+      tags: claude
+    - role: workspace
+      become: true
+      tags: workspace
+    - role: agent_servers
+      become: true
+      tags: agent_servers
+    - role: day2
+      become: true
+      tags: day2
+
+  post_tasks:
+    - name: What is left to do by hand
+      ansible.builtin.debug:
+        msg: "{{ lookup('ansible.builtin.template', 'templates/next-steps.j2') | trim | split('\n') }}"
+      tags: always

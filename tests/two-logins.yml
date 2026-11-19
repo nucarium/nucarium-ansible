@@ -1,0 +1,14 @@
+---
+# A second shape to render: two Claude logins, a repository from another
+# owner, Watch switched off, and the Terraform token read from the vault.
+environments:
+  - name: main
+    capacity: 8
+  - name: second
+    capacity: 4
+    config_dir: /home/agent/.claude-second
+repos:
+  - web
+  - other-org/tools
+watch_target: none
+hcp_mode: vault

@@ -1,0 +1,11 @@
+[Unit]
+Description=Fetch the HCP Terraform token for the agents
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=broker
+ExecStart=/usr/local/sbin/agent-hcp-token
+Restart=on-failure
+RestartSec=30

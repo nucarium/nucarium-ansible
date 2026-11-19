@@ -1,0 +1,25 @@
+[Unit]
+Description=Nightly backup of agent transcripts, seed files and configuration
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/restic/env
+# Sign-ins are left out: the Claude logins and the Nucarium Watch machine
+# token are replaced by signing in again, not by restoring a copy.
+ExecStart=/usr/bin/restic backup \
+{% for dir in day2_claude_dirs %}
+  --exclude {{ dir }}/.credentials.json \
+  --exclude {{ dir }}/remote \
+{% endfor %}
+  --exclude {{ day2_watch_token_file }} \
+{% for dir in day2_claude_dirs %}
+  {{ dir }} \
+{% endfor %}
+  {{ agent_home }}/.config \
+  {{ agent_home }}/.local/bin \
+  {{ nucleus_root }}/.seeds \
+  {{ nucleus_root }}/.claude \
+  /etc/nut /etc/systemd/system /usr/local/sbin
+ExecStartPost=/usr/bin/restic forget --keep-daily 7 --keep-weekly 8 --prune

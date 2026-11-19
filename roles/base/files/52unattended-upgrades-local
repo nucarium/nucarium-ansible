@@ -1,0 +1,6 @@
+Unattended-Upgrade::Origins-Pattern {
+  "site=pkgs.tailscale.com";
+  "site=cli.github.com";
+  "site=apt.releases.hashicorp.com";
+  "site=downloads.1password.com";
+};

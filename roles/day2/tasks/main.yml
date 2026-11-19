@@ -1,0 +1,8 @@
+---
+# Keeping the box alive unattended: nucleated, the box daemon, and the two
+# jobs it does not own.
+- name: Set up nucleated and sign the box in to Nucarium Watch
+  ansible.builtin.import_tasks: nucleated.yml
+
+- name: Set up the weekly disk cleanup and the nightly backup
+  ansible.builtin.import_tasks: jobs.yml

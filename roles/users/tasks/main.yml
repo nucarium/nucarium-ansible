@@ -1,0 +1,88 @@
+---
+- name: Create the agent user (no sudo, no password)
+  ansible.builtin.user:
+    name: "{{ agent_user }}"
+    comment: Agents
+    shell: /bin/bash
+    password: "!"
+
+- name: Look up the agent user's id and home folder
+  ansible.builtin.include_tasks: ../../../tasks/agent-user.yml
+
+- name: Create the agent user's SSH folder
+  ansible.builtin.file:
+    path: "{{ agent_home }}/.ssh"
+    state: directory
+    owner: "{{ agent_user }}"
+    group: "{{ agent_user }}"
+    mode: "0700"
+
+- name: Let the operator's keys log in as the agent user
+  ansible.builtin.copy:
+    remote_src: true
+    src: /home/{{ operator_user }}/.ssh/authorized_keys
+    dest: "{{ agent_home }}/.ssh/authorized_keys"
+    owner: "{{ agent_user }}"
+    group: "{{ agent_user }}"
+    mode: "0600"
+
+- name: Let the agent user's services run with nobody logged in
+  ansible.builtin.command: loginctl enable-linger {{ agent_user }}
+  args:
+    creates: /var/lib/systemd/linger/{{ agent_user }}
+
+- name: Create the broker user that holds long-lived secrets
+  ansible.builtin.user:
+    name: broker
+    system: true
+    home: /var/lib/agent-broker
+    shell: /usr/sbin/nologin
+
+- name: Create the broker's secrets folder
+  ansible.builtin.file:
+    path: /etc/agent-broker
+    state: directory
+    owner: broker
+    group: broker
+    mode: "0700"
+
+- name: Declare the short-lived token folder
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/agent-tokens.conf
+    content: "d /run/agent-tokens 2750 broker {{ agent_user }} -\n"
+    mode: "0644"
+  register: users_tmpfiles
+
+# Done here, not in a handler: the broker role writes into the folder later
+# in the same run.
+- name: Create the short-lived token folder  # noqa: no-handler
+  ansible.builtin.command: systemd-tmpfiles --create /etc/tmpfiles.d/agent-tokens.conf
+  changed_when: true
+  when: users_tmpfiles is changed
+
+- name: Check the command sandbox works for the agent user
+  ansible.builtin.command: bwrap --ro-bind / / true
+  become: true
+  become_user: "{{ agent_user }}"
+  register: users_bwrap
+  changed_when: false
+  failed_when: false
+
+- name: Allow the sandbox through AppArmor
+  when: users_bwrap.rc != 0
+  block:
+    - name: Install the AppArmor profile for bwrap
+      ansible.builtin.copy:
+        src: bwrap.apparmor
+        dest: /etc/apparmor.d/bwrap
+        mode: "0644"
+
+    - name: Load the AppArmor profile
+      ansible.builtin.command: apparmor_parser -r /etc/apparmor.d/bwrap
+      changed_when: true
+
+    - name: Check the sandbox again
+      ansible.builtin.command: bwrap --ro-bind / / true
+      become: true
+      become_user: "{{ agent_user }}"
+      changed_when: false

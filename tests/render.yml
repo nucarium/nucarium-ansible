@@ -1,0 +1,95 @@
+---
+# Renders every template against the example settings, on your workstation,
+# into out/render/. Nothing connects to a box.
+#
+#   ansible-playbook tests/render.yml
+#   ansible-playbook tests/render.yml -e @tests/two-logins.yml
+- name: Render the templates locally
+  hosts: boxes
+  connection: local
+  gather_facts: false
+  become: false
+  vars_files:
+    - ../roles/workspace/vars/main.yml
+    - ../roles/claude/vars/main.yml
+    - ../roles/day2/vars/main.yml
+  vars:
+    render_dir: "{{ playbook_dir }}/../out/render"
+    agent_home: /home/{{ agent_user }}
+    agent_uid: "1001"
+    nucleus_root: "{{ agent_home }}/workspace"
+    env_config_dir: "{{ env.config_dir | default(agent_home ~ '/.claude') }}"
+    env_claude: "{{ {} if env_config_dir == agent_home ~ '/.claude' else {'CLAUDE_CONFIG_DIR': env_config_dir} }}"
+    watch_console_url: https://app.nucarium.com
+    render_per_server:
+      - src: ../roles/agent_servers/templates/agent-server.env.j2
+        dest: env
+      - src: ../roles/claude/templates/settings.json.j2
+        dest: settings.json
+    # Stand-ins for values the real run reads from the box.
+    nut_password:
+      content: "{{ 'example-monitor-password' | b64encode }}"
+  tasks:
+    - name: Start from an empty folder
+      ansible.builtin.file:
+        path: "{{ render_dir }}"
+        state: "{{ item }}"
+        mode: "0700"
+      loop:
+        - absent
+        - directory
+
+    - name: Render the templates that are the same for every agent server
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "{{ render_dir }}/{{ item.dest }}"
+        mode: "0600"
+      loop:
+        - src: ../roles/day2/templates/nucleated-config.toml.j2
+          dest: nucleated-config.toml
+        - src: ../roles/workspace/templates/nucleate-config.toml.j2
+          dest: nucleate-config.toml
+        - src: ../roles/agent_servers/templates/agents.slice.j2
+          dest: agents.slice
+        - src: ../roles/day2/templates/agent-backup.service.j2
+          dest: agent-backup.service
+        - src: ../roles/broker/templates/agent-github-token.j2
+          dest: agent-github-token
+        - src: ../roles/broker/templates/agent-hcp-token.j2
+          dest: agent-hcp-token
+        - src: ../roles/nut/templates/ups.conf.j2
+          dest: ups.conf
+        - src: ../roles/nut/templates/upsd.users.j2
+          dest: upsd.users
+        - src: ../roles/nut/templates/upsmon.conf.j2
+          dest: upsmon.conf
+      loop_control:
+        label: "{{ item.dest }}"
+
+    - name: Render each agent server's settings and its Claude Code settings
+      ansible.builtin.template:
+        src: "{{ outer.1.src }}"
+        dest: "{{ render_dir }}/{{ outer.0.name }}.{{ outer.1.dest }}"
+        mode: "0600"
+      vars:
+        env: "{{ outer.0 }}"
+      loop: "{{ environments | product(render_per_server) }}"
+      loop_control:
+        loop_var: outer
+        label: "{{ outer.0.name }}.{{ outer.1.dest }}"
+
+    - name: Render the closing message
+      ansible.builtin.copy:
+        content: "{{ lookup('ansible.builtin.template', '../templates/next-steps.j2') }}"
+        dest: "{{ render_dir }}/next-steps.txt"
+        mode: "0600"
+
+    - name: Record the values the roles derive
+      ansible.builtin.copy:
+        content: |
+          nucleate_url: {{ workspace_nucleate_url }}
+          day2_claude_dirs: {{ day2_claude_dirs | join(' ') }}
+          clone_urls: {% for item in repos %}https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git -> .repos/{{ item | basename }}.git {% endfor %}
+
+        dest: "{{ render_dir }}/derived.txt"
+        mode: "0600"

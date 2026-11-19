@@ -1,0 +1,50 @@
+---
+fail_fast: false
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  # Conventional commit messages (type(scope): summary).
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.5.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  # Standard file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: no-commit-to-branch
+        args: [--branch, main]
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-json
+      - id: check-yaml
+      - id: check-symlinks
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-executables-have-shebangs
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+
+  # The same linters, at the same versions, as scripts/check and the Build
+  # workflow (requirements-dev.txt).
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+
+  - repo: https://github.com/ansible/ansible-lint
+    rev: v26.11.0
+    hooks:
+      - id: ansible-lint
+        additional_dependencies: [ansible==15.0.0]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck

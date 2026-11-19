@@ -1,0 +1,25 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: {{ timezone }}
+  identity:
+    hostname: {{ inventory_hostname }}
+    username: {{ operator_user }}
+    password: "{{ autoinstall_password | password_hash('sha512') }}"
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys:
+      - {{ lookup('ansible.builtin.file', autoinstall_ssh_key_file) }}
+  storage:
+    layout:
+      name: lvm
+      sizing-policy: all
+      password: {{ autoinstall_passphrase | to_json }}
+      match:
+        size: largest
+  updates: security
+  shutdown: reboot

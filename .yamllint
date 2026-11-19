@@ -1,0 +1,25 @@
+---
+extends: default
+
+ignore: |
+  .venv/
+  .ansible/
+  out/
+
+rules:
+  # Jinja expressions, PATH values and download addresses read worse folded
+  # than long, so line length is not checked.
+  line-length: disable
+  # The four below are the settings ansible-lint requires of any yamllint
+  # configuration it shares a repository with.
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  # GitHub's workflow files have a key named "on", which is not a boolean.
+  truthy:
+    check-keys: false

@@ -1,0 +1,105 @@
+---
+# The jobs nucleated does not own: a weekly disk cleanup of container images,
+# the pnpm store and the journal, and the nightly backup.
+
+- name: Weekly disk cleanup, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  block:
+    - name: Create folders for the cleanup
+      ansible.builtin.file:
+        path: "{{ agent_home }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - .local/bin
+        - .config/systemd/user
+
+    - name: Install the cleanup script
+      ansible.builtin.copy:
+        src: agent-gc
+        dest: "{{ agent_home }}/.local/bin/agent-gc"
+        mode: "0755"
+
+    - name: Install its service and timer
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ agent_home }}/.config/systemd/user/{{ item }}"
+        mode: "0644"
+      loop:
+        - agent-gc.service
+        - agent-gc.timer
+
+    - name: Run the cleanup weekly
+      ansible.builtin.systemd_service:
+        name: agent-gc.timer
+        scope: user
+        enabled: true
+        state: started
+        daemon_reload: true
+
+# Repositories and work in progress are on GitHub. What exists only on the
+# box is the agents' session transcripts, the seed files and the box's own
+# configuration. This backs those up nightly, encrypted, to object storage.
+- name: Nightly backup
+  when: secrets.restic_repository is defined
+  block:
+    - name: Install restic
+      ansible.builtin.apt:
+        name: restic
+        state: present
+
+    - name: Create the backup configuration folder
+      ansible.builtin.file:
+        path: /etc/restic
+        state: directory
+        mode: "0700"
+
+    - name: Install the backup credentials
+      ansible.builtin.copy:
+        dest: /etc/restic/env
+        content: |
+          RESTIC_REPOSITORY={{ secrets.restic_repository }}
+          RESTIC_PASSWORD={{ secrets.restic_password }}
+          AWS_ACCESS_KEY_ID={{ secrets.restic_access_key_id }}
+          AWS_SECRET_ACCESS_KEY={{ secrets.restic_secret_access_key }}
+        mode: "0600"
+      no_log: true
+
+    - name: Install the backup service
+      ansible.builtin.template:
+        src: agent-backup.service.j2
+        dest: /etc/systemd/system/agent-backup.service
+        mode: "0644"
+
+    - name: Install the backup timer
+      ansible.builtin.copy:
+        src: agent-backup.timer
+        dest: /etc/systemd/system/agent-backup.timer
+        mode: "0644"
+
+    - name: Check whether the backup repository exists
+      ansible.builtin.shell: |
+        set -a; . /etc/restic/env; restic cat config
+      args:
+        executable: /bin/bash
+      register: day2_restic
+      changed_when: false
+      failed_when: false
+
+    - name: Create the backup repository
+      ansible.builtin.shell: |
+        set -a; . /etc/restic/env; restic init
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: day2_restic.rc != 0
+
+    - name: Back up nightly
+      ansible.builtin.systemd_service:
+        name: agent-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: true

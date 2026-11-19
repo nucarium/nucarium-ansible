@@ -1,0 +1,28 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_size = 2
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.py]
+indent_size = 4
+
+# YAML allows no tabs, and yamllint and ansible-lint expect two spaces.
+[*.{yml,yaml}]
+indent_size = 2
+indent_style = space
+
+# A template renders a file of some other kind (a unit, TOML, JSON), and its
+# layout is that file's. Keep it as written; the final newline is the
+# rendered file's too.
+[*.j2]
+indent_size = unset
+trim_trailing_whitespace = true
+insert_final_newline = true

@@ -1,0 +1,99 @@
+---
+- name: Update every package
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: full
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - acl
+      - build-essential
+      - git
+      - tmux
+      - curl
+      - wget
+      - unzip
+      - jq
+      - ripgrep
+      - podman
+      - uidmap
+      - bubblewrap
+      - socat
+      - python3-jwt
+      - python3-cryptography
+      - python3-venv
+      - nvme-cli
+      - smartmontools
+      - unattended-upgrades
+      - ufw
+    state: present
+
+- name: Set the time zone
+  community.general.timezone:
+    name: "{{ timezone }}"
+
+- name: Never sleep
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    masked: true
+  loop:
+    - sleep.target
+    - suspend.target
+    - hibernate.target
+    - hybrid-sleep.target
+
+- name: Turn on automatic security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    mode: "0644"
+
+- name: Include outside package sources in automatic updates
+  ansible.builtin.copy:
+    src: 52unattended-upgrades-local
+    dest: /etc/apt/apt.conf.d/52unattended-upgrades-local
+    mode: "0644"
+
+- name: Raise file-watcher limits for many agents
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-agents.conf
+    state: present
+  loop:
+    - key: fs.inotify.max_user_instances
+      value: "1024"
+    - key: fs.inotify.max_user_watches
+      value: "1048576"
+
+- name: Let TRIM reach the SSD through disk encryption
+  ansible.builtin.lineinfile:
+    path: /etc/crypttab
+    regexp: '^(\S+\s+\S+\s+\S+\s+)luks$'
+    line: '\1luks,discard'
+    backrefs: true
+  notify: Rebuild the boot image
+
+- name: Check Ubuntu Pro status
+  ansible.builtin.command: pro status --format json
+  register: base_pro_status
+  changed_when: false
+  when: secrets.ubuntu_pro_token is defined
+
+- name: Attach Ubuntu Pro
+  ansible.builtin.command: pro attach {{ secrets.ubuntu_pro_token }}
+  no_log: true
+  changed_when: true
+  when:
+    - secrets.ubuntu_pro_token is defined
+    - not (base_pro_status.stdout | from_json).attached
+
+- name: Turn on Livepatch
+  ansible.builtin.command: pro enable livepatch
+  register: base_livepatch
+  changed_when: "'already enabled' not in (base_livepatch.stdout + base_livepatch.stderr)"
+  failed_when: base_livepatch.rc != 0 and 'already enabled' not in (base_livepatch.stdout + base_livepatch.stderr)
+  when: secrets.ubuntu_pro_token is defined
