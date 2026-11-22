@@ -73,6 +73,11 @@ Environment=AGENT_SERVER_NUCLEUS={{ env_nucleus }}
 # requires), check it before they run git there, and run git with
 # core.hooksPath=/dev/null.
 Volume={{ env_nucleus }}:{{ env_nucleus }}
+# The repositories and the sessions' folders, writable, each its own mount so
+# that nothing in the container can swap them for a link to elsewhere on the
+# box, which nucleated on the host would follow.
+Volume={{ env_nucleus }}/.repos:{{ env_nucleus }}/.repos
+Volume={{ env_nucleus }}/.worktrees:{{ env_nucleus }}/.worktrees
 {% for path in nucarium_nucleus_protected %}
 Volume={{ env_nucleus }}/{{ path }}:{{ env_nucleus }}/{{ path }}:ro
 {% endfor %}

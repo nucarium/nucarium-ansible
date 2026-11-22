@@ -64,13 +64,19 @@ if ! podman image exists "$image"; then
   exit 1
 fi
 
-# .repos itself must be the nucleus's own folder: a link there would choose
-# which of the box's folders the loop below mounts into the container.
-if [ -L "$nucleus/.repos" ]; then
-  refuse .repos "a link" "a folder"
-elif [ ! -d "$nucleus/.repos" ]; then
-  refuse .repos "missing or not a folder" "a folder"
-fi
+# .repos and .worktrees must be the nucleus's own folders: the container
+# gets each as a mount of its own, and a link there would choose which of the
+# box's folders it gets (and, for .repos, which hooks folders the loop below
+# mounts).
+for own in .repos .worktrees; do
+  if [ -L "$nucleus/$own" ]; then
+    echo "Environment $name's agent server does not start: $own in the nucleus is a link, and must be a folder of its own." >&2
+    exit 1
+  elif [ ! -d "$nucleus/$own" ]; then
+    echo "Environment $name's agent server does not start: $own in the nucleus is missing or not a folder." >&2
+    exit 1
+  fi
+done
 repos_real=$(realpath "$nucleus/.repos")
 
 volumes=()

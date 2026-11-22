@@ -24,6 +24,7 @@ class AgentEnvStart(unittest.TestCase):
         os.makedirs(os.path.join(self.nucleus, ".claude"))
         os.makedirs(os.path.join(self.nucleus, ".seeds"))
         os.makedirs(os.path.join(self.nucleus, ".repos", "web.git", "hooks"))
+        os.makedirs(os.path.join(self.nucleus, ".worktrees"))
         for name in (".claude/settings.json", ".mcp.json", "AGENTS.md", "CLAUDE.md"):
             with open(os.path.join(self.nucleus, name), "w") as f:
                 f.write("{}\n")
@@ -74,7 +75,18 @@ class AgentEnvStart(unittest.TestCase):
         os.makedirs(os.path.join(elsewhere, "x.git", "hooks"))
         os.rename(self.path(".repos"), os.path.join(self.tmp.name, "repos-moved"))
         os.symlink(elsewhere, self.path(".repos"))
-        self.assert_refused(".repos", "a link")
+        done = self.run_start()
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn(".repos in the nucleus is a link", done.stderr)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_refuses_worktrees_as_a_link(self):
+        os.rmdir(self.path(".worktrees"))
+        os.symlink(os.path.join(self.tmp.name), self.path(".worktrees"))
+        done = self.run_start()
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn(".worktrees in the nucleus is a link", done.stderr)
+        self.assertFalse(os.path.exists(self.out))
 
     def test_refuses_a_missing_claude_md(self):
         os.remove(self.path("CLAUDE.md"))

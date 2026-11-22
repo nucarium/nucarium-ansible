@@ -52,9 +52,11 @@
         loop_var: outer
         label: "{{ outer.0.name }}: {{ outer.1 }}"
 
-    # Read-only in the container, which does not start without them
-    # (nucarium_nucleus_protected), so that it cannot plant hooks or
-    # instructions there either.
+    # .seeds and .claude are read-only in the container, which does not start
+    # without them (nucarium_nucleus_protected), so that it cannot plant hooks
+    # or instructions there either. .repos and .worktrees are mounts of their
+    # own, so that it cannot swap them for links; it does not start without
+    # them either.
     - name: Create the folders the recipe adds to each
       ansible.builtin.file:
         path: "{{ env_nucleus }}/{{ outer.1 }}"
@@ -62,7 +64,7 @@
         mode: "0755"
       vars:
         env: "{{ outer.0 }}"
-      loop: "{{ workspace_container_envs | product(['.seeds', '.claude']) | list }}"
+      loop: "{{ workspace_container_envs | product(['.seeds', '.claude', '.repos', '.worktrees']) | list }}"
       loop_control:
         loop_var: outer
         label: "{{ outer.0.name }}: {{ outer.1 }}"

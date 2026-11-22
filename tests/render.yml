@@ -493,6 +493,8 @@
         # Each mount's host path, and how it is mounted, in order.
         render_mounts:
           - [rw, "{{ render_nucleus }}"]
+          - [rw, "{{ render_nucleus }}/.repos"]
+          - [rw, "{{ render_nucleus }}/.worktrees"]
           - [ro, "{{ render_nucleus }}/.claude"]
           - [ro, "{{ render_nucleus }}/.seeds"]
           - [ro, "{{ render_nucleus }}/.mcp.json"]
