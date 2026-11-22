@@ -11,7 +11,8 @@
 # goes to the journal only. The last run is recorded, atomically, in
 # /var/lib/nucarium/environments/<name>.setup.json: running from start to
 # finish, then ok on exit 0 or failed on any other exit, with 124 for the time
-# limit and 128+n for signal n.
+# limit and 128+n for signal n. A run stopped by a signal is failed even if
+# the script caught it and exited 0.
 #
 # It starts in /root, not in the nucleus: the agent can write the nucleus, and
 # git, npm, pip and their kind read config from the folder they start in, so a
@@ -64,15 +65,30 @@ if cd /root; then
   # down) is passed on to the script and still recorded, as 128+n.
   HOME=/root NUCLEUS_ROOT="$NUCLEUS_ROOT" timeout --kill-after=60 "$limit_s" bash "$script" < /dev/null &
   child=$!
-  signalled=
-  trap 'signalled=1; kill -TERM "$child" 2> /dev/null || true' TERM INT HUP
+  # The first signal is kept: a run that was stopped is failed, 128+n, even
+  # if the script caught the signal and exited 0. "again" only tells the loop
+  # that wait returned for a signal, not because the script ended.
+  signal=
+  again=
+  # shellcheck disable=SC2329  # called by the traps below
+  on_signal() {
+    signal="${signal:-$1}"
+    again=1
+    kill -TERM "$child" 2> /dev/null || true
+  }
+  trap 'on_signal 1' HUP
+  trap 'on_signal 2' INT
+  trap 'on_signal 15' TERM
   while :; do
-    signalled=
+    again=
     rc=0
     wait "$child" || rc=$?
-    [ -z "$signalled" ] && break
+    [ -z "$again" ] && break
   done
   trap - TERM INT HUP
+  if [ -n "$signal" ]; then
+    rc=$((128 + signal))
+  fi
 else
   rc=1
 fi
