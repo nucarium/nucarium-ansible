@@ -1,0 +1,186 @@
+---
+# The network of each container environment: two networks and a proxy, as
+# quadlet files for the agent user's manager, and the proxy's rules
+# (vars/proxy.yml says what each is and where). The files are root's; the
+# image, the networks and the proxies are the agent user's. Starts the
+# proxies, and nothing else: no agent server.
+#
+# Input: env_runtime_proxy_environments, the container environments, each
+# with name, network and allowed_hosts as in environments. A proxy whose
+# environment is not in it is stopped and removed, with its networks.
+#
+# The rules apply to the next request when they change, with no restart. A
+# changed proxy image or unit restarts the proxy, which cuts its open
+# connections (Claude Code reconnects).
+- name: Read the proxy's settings
+  ansible.builtin.include_vars: proxy.yml
+
+- name: Read the sandbox's host lists, which limited shares
+  ansible.builtin.include_vars: "{{ role_path }}/../claude/vars/main.yml"
+  when: claude_sandbox_network is not defined
+
+- name: The proxy image, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  block:
+    - name: Create the proxy image's build folder
+      ansible.builtin.file:
+        path: "{{ env_runtime_proxy_build_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy what the proxy image is built from
+      ansible.builtin.copy:
+        src: proxy/{{ item }}
+        dest: "{{ env_runtime_proxy_build_dir }}/{{ item }}"
+        mode: "{{ '0755' if item == 'nucarium-proxy' else '0644' }}"
+      loop: "{{ env_runtime_proxy_files }}"
+
+    - name: Look for the proxy image
+      ansible.builtin.command:
+        argv: [podman, image, exists, "{{ env_runtime_proxy_image }}"]
+      register: env_runtime_proxy_image_found
+      changed_when: false
+      failed_when: env_runtime_proxy_image_found.rc not in [0, 1]
+      check_mode: false
+
+    - name: Build the proxy image
+      ansible.builtin.command:
+        argv: [podman, build, --tag, "{{ env_runtime_proxy_image }}", "{{ env_runtime_proxy_build_dir }}"]
+      when: env_runtime_proxy_image_found.rc != 0
+      register: env_runtime_proxy_built
+      changed_when: true
+
+- name: Create root's folders for the quadlet files and the rules
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ env_runtime_quadlet_dir }}"
+    - "{{ env_runtime_proxy_rules_root | dirname }}"
+    - "{{ env_runtime_proxy_rules_root }}"
+
+- name: Create a rules folder for each environment
+  become: true
+  ansible.builtin.file:
+    path: "{{ env_runtime_proxy_rules_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ env_runtime_proxy_environments }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
+# Copied to a temporary file in the same folder and renamed into place, so
+# the proxy never reads half of one.
+- name: Write each environment's rules
+  become: true
+  ansible.builtin.copy:
+    content: "{{ env_runtime_proxy_rules | to_nice_json }}\n"
+    dest: "{{ env_runtime_proxy_rules_dir }}/rules.json"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ env_runtime_proxy_environments }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
+- name: Write each environment's networks and proxy
+  become: true
+  ansible.builtin.template:
+    src: proxy/{{ item.1 }}
+    dest: "{{ env_runtime_quadlet_dir }}/{{ env_runtime_proxy_quadlets[item.1] }}"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    env: "{{ item.0 }}"
+  loop: "{{ env_runtime_proxy_environments | product(['internal.network.j2', 'egress.network.j2', 'proxy.container.j2']) | list }}"
+  loop_control:
+    label: "{{ item.0.name }}: {{ item.1 }}"
+  register: env_runtime_proxy_units
+
+- name: List the proxies set up on the box
+  ansible.builtin.find:
+    paths: "{{ env_runtime_quadlet_dir }}"
+    patterns: nucarium-proxy-*.container
+  register: env_runtime_proxy_found
+
+- name: Remove the proxies of environments that are no longer container environments
+  vars:
+    env_runtime_proxy_gone: >-
+      {{ env_runtime_proxy_found.files | map(attribute='path') | map('basename')
+      | map('regex_replace', '^nucarium-proxy-(.*)\.container$', '\1')
+      | difference(env_runtime_proxy_environments | map(attribute='name')) }}
+  block:
+    - name: Stop their proxies and networks, and remove the networks
+      become: true
+      become_user: "{{ agent_user }}"
+      environment:
+        XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+      block:
+        - name: Stop their proxies and networks
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            scope: user
+            state: stopped
+          loop: >-
+            {{ env_runtime_proxy_gone | map('regex_replace', '^(.*)$', 'nucarium-proxy-\1.service') | list
+            + env_runtime_proxy_gone | map('regex_replace', '^(.*)$', 'nucarium-\1-network.service') | list
+            + env_runtime_proxy_gone | map('regex_replace', '^(.*)$', 'nucarium-\1.out-network.service') | list }}
+
+        - name: Remove their networks
+          ansible.builtin.command:
+            argv: [podman, network, rm, "nucarium-{{ item }}", "nucarium-{{ item }}.out"]
+          loop: "{{ env_runtime_proxy_gone }}"
+          register: env_runtime_proxy_network_rm
+          changed_when: env_runtime_proxy_network_rm.rc == 0
+          failed_when: env_runtime_proxy_network_rm.rc != 0 and 'network not found' not in env_runtime_proxy_network_rm.stderr
+
+    - name: Remove their quadlet files and rules
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ env_runtime_proxy_gone | map('regex_replace', '^(.*)$', env_runtime_quadlet_dir ~ '/nucarium-proxy-\1.container') | list
+        + env_runtime_proxy_gone | map('regex_replace', '^(.*)$', env_runtime_quadlet_dir ~ '/nucarium-\1.network') | list
+        + env_runtime_proxy_gone | map('regex_replace', '^(.*)$', env_runtime_quadlet_dir ~ '/nucarium-\1.out.network') | list
+        + env_runtime_proxy_gone | map('regex_replace', '^(.*)$', env_runtime_proxy_rules_root ~ '/\1') | list }}
+
+- name: The proxies, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  block:
+    # Quadlet turns the files into units, and removes the units of removed
+    # files, when the user manager reloads.
+    - name: Reload the agent user's units
+      ansible.builtin.systemd_service:
+        scope: user
+        daemon_reload: true
+
+    # Started at every boot through its [Install] section.
+    - name: Start each environment's proxy
+      ansible.builtin.systemd_service:
+        name: nucarium-proxy-{{ env.name }}.service
+        scope: user
+        state: "{{ 'restarted' if env_runtime_proxy_changed else 'started' }}"
+      vars:
+        env_runtime_proxy_changed: >-
+          {{ env_runtime_proxy_built is changed
+          or env_runtime_proxy_units.results | selectattr('item.0.name', 'equalto', env.name) | select('changed') | list | length > 0 }}
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"

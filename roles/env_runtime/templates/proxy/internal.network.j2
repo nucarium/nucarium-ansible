@@ -1,0 +1,13 @@
+# Environment {{ env.name }}'s own network: its containers and its proxy.
+[Unit]
+Description=Network of environment {{ env.name }}, with no route out
+
+[Network]
+NetworkName={{ env_runtime_network }}
+# No route out of it: the proxy is the only way.
+Internal=true
+# No traffic to or from any other network that is isolated too, so one
+# environment cannot reach another's containers or proxy.
+Options=isolate=true
+# DNS stays on, for container names (the proxy's) only: on an internal
+# network aardvark-dns forwards nothing, so a lookup of any other name fails.

@@ -19,7 +19,7 @@ shell_files="
 "
 
 echo "== syntax"
-ansible-playbook --syntax-check site.yml autoinstall.yml tests/render.yml
+ansible-playbook --syntax-check site.yml autoinstall.yml tests/render.yml tests/proxy.yml
 
 echo "== ansible-lint"
 ansible-lint
@@ -38,6 +38,12 @@ echo "== render the templates from the example settings, in three shapes"
 ansible-playbook tests/render.yml
 ansible-playbook tests/render.yml -e @tests/two-logins.yml
 ansible-playbook tests/render.yml -e @tests/three-networks.yml
+
+echo "== render the container environments' networks and proxies"
+ansible-playbook tests/proxy.yml
+
+echo "== the proxy's decisions"
+python3 -m unittest discover -s tests -p 'test_*.py'
 
 echo "== refuse environments the recipe cannot set up"
 # Each must stop the playbook before anything is rendered, with a message

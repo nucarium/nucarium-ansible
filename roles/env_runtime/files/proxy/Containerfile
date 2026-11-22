@@ -1,0 +1,16 @@
+# The proxy every container environment reaches the network through: one
+# container of this image per environment (tasks/proxy.yml). mitmproxy's own
+# image, pinned by digest, which pins mitmproxy and everything it runs on;
+# the tag says which release the digest is. Changing anything in this folder
+# gives the image a new tag, and the proxies restart on it at the next run.
+FROM docker.io/mitmproxy/mitmproxy:12.3.1@sha256:2711066c855659b5af8b1dbb84494ed3eff69b42ece439c60b4fe09a2db829d4
+
+COPY --chmod=0644 nucarium_proxy.py /opt/nucarium-proxy/nucarium_proxy.py
+COPY --chmod=0755 nucarium-proxy /opt/nucarium-proxy/nucarium-proxy
+
+# The image's entrypoint changes the mitmproxy user's uid to match its
+# folder's owner, as root; this one starts as that user and stays it.
+USER mitmproxy
+ENV HOME=/home/mitmproxy
+ENTRYPOINT ["/opt/nucarium-proxy/nucarium-proxy"]
+CMD []
