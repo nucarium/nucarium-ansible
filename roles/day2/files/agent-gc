@@ -23,8 +23,10 @@ in_container() {
 prune_tags() {
   local repo=$1 keep=$2 current ref id
   current=
-  if [ "$keep" = yes ]; then
-    current=$(podman image inspect --format '{{.Id}}' "$repo:current" 2> /dev/null) || current=
+  # Without knowing what :current is, nothing of the repository is touched.
+  if [ "$keep" = yes ] && ! current=$(podman image inspect --format '{{.Id}}' "$repo:current" 2> /dev/null); then
+    echo "skipped $repo: cannot tell which image is $repo:current"
+    return 0
   fi
   podman images --noheading --no-trunc --filter "reference=$repo" --format '{{.Repository}}:{{.Tag}} {{.ID}}' |
     while read -r ref id; do

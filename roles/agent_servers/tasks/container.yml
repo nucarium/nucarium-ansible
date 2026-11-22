@@ -118,6 +118,19 @@
         state: stopped
       loop: "{{ agent_servers_gone | difference(environments | map(attribute='name')) }}"
 
+    # So that nothing of them is left failed, or waiting to start again.
+    - name: Forget their units' failures
+      become: true
+      become_user: "{{ agent_user }}"
+      environment:
+        XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+      ansible.builtin.command:
+        argv: [systemctl, --user, reset-failed, "agent-env-{{ item }}.service", "nucarium-env-build@{{ item }}.service", "nucarium-env-check@{{ item }}.service"]
+      loop: "{{ agent_servers_gone | difference(environments | map(attribute='name')) }}"
+      register: agent_servers_reset
+      changed_when: false
+      failed_when: false
+
     - name: Remove the quadlet files and folders of the others
       become: true
       ansible.builtin.file:

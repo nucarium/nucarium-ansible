@@ -18,7 +18,9 @@
 #       longer this unit's, starts the other unit. So a switch takes effect
 #       when the running server stops: by itself after about ten minutes
 #       with no session, or when you stop or restart it. Never while it
-#       runs, so no live session is cut. Always exits 0.
+#       runs, so no live session is cut. An environment that is no longer in
+#       the settings (no runtime file, or no agent server settings for the
+#       host unit) has nothing to hand over to. Always exits 0.
 set -euo pipefail
 
 usage() {
@@ -38,6 +40,8 @@ file="/etc/nucarium/environments/$name/runtime"
 if [ -r "$file" ] && [ "$(tr -d '[:space:]' < "$file")" = container ]; then
   configured=container
 fi
+# What the host unit starts the server with (agent-server@.service).
+host_settings="$HOME/.config/agent-servers/$name.env"
 
 unit() {
   if [ "$1" = container ]; then
@@ -56,6 +60,9 @@ case "$action" in
     exit 1
     ;;
   hand-over)
+    if [ ! -r "$file" ] || { [ "$configured" = host ] && [ ! -r "$host_settings" ]; }; then
+      exit 0
+    fi
     if [ "$configured" != "$this" ]; then
       echo "Environment $name now runs as $(unit "$configured"): starting it."
       systemctl --user start --no-block "$(unit "$configured")" || true
