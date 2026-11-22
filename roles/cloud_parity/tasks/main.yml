@@ -1,0 +1,233 @@
+---
+# Gives the agents the tools a Claude Code cloud session has, in the places
+# a cloud session has them, so a session here holds no surprises. What still
+# differs: agents are not root and cannot install system packages, and the
+# box runs the Ubuntu release the recipe was installed with.
+
+- name: Install the cloud session's packages
+  ansible.builtin.apt:
+    name: "{{ cloud_parity_packages }}"
+    state: present
+
+- name: Keep PostgreSQL and Redis stopped until something starts them
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - postgresql
+    - redis-server
+
+- name: Let docker run quietly on Podman
+  ansible.builtin.copy:
+    dest: /etc/containers/nodocker
+    content: ""
+    mode: "0644"
+
+- name: Install the Python tools for everyone
+  ansible.builtin.command: pipx install {{ item }}
+  environment:
+    PIPX_HOME: /opt/pipx
+    PIPX_BIN_DIR: /usr/local/bin
+    PIPX_MAN_DIR: /usr/local/share/man
+  args:
+    creates: /usr/local/bin/{{ item }}
+  loop: "{{ cloud_parity_pipx_tools }}"
+
+- name: Install yq
+  ansible.builtin.get_url:
+    url: https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    dest: /usr/local/bin/yq
+    mode: "0755"
+    force: false
+
+# Node beside the agent user's own: /opt/node22 and /opt/node24, each the
+# newest release of its line, checked against nodejs.org's published sums.
+- name: Find the newest release of each Node line
+  ansible.builtin.uri:
+    url: https://nodejs.org/dist/index.json
+    return_content: true
+  register: cloud_parity_node_index
+  check_mode: false
+
+- name: Install Node under /opt
+  vars:
+    cloud_parity_node_release: >-
+      {{ cloud_parity_node_index.json | selectattr('version', 'match', '^v' ~ item ~ '\.')
+      | map(attribute='version') | first }}
+    cloud_parity_node_dir: node-{{ cloud_parity_node_release }}-linux-x64
+  block:
+    - name: Download each Node release
+      ansible.builtin.get_url:
+        url: https://nodejs.org/dist/{{ cloud_parity_node_release }}/{{ cloud_parity_node_dir }}.tar.xz
+        dest: /opt/{{ cloud_parity_node_dir }}.tar.xz
+        checksum: sha256:https://nodejs.org/dist/{{ cloud_parity_node_release }}/SHASUMS256.txt
+        mode: "0644"
+      loop: "{{ cloud_parity_node_majors }}"
+
+    - name: Unpack each Node release
+      ansible.builtin.unarchive:
+        src: /opt/{{ cloud_parity_node_dir }}.tar.xz
+        dest: /opt
+        remote_src: true
+        creates: /opt/{{ cloud_parity_node_dir }}/bin/node
+      loop: "{{ cloud_parity_node_majors }}"
+
+    - name: Point /opt/node<major> at each
+      ansible.builtin.file:
+        src: /opt/{{ cloud_parity_node_dir }}
+        dest: /opt/node{{ item }}
+        state: link
+      loop: "{{ cloud_parity_node_majors }}"
+
+- name: Install Gradle
+  block:
+    - name: Download Gradle
+      ansible.builtin.get_url:
+        url: https://services.gradle.org/distributions/gradle-{{ gradle_version }}-bin.zip
+        dest: /opt/gradle-{{ gradle_version }}-bin.zip
+        checksum: sha256:https://services.gradle.org/distributions/gradle-{{ gradle_version }}-bin.zip.sha256
+        mode: "0644"
+
+    - name: Unpack Gradle
+      ansible.builtin.unarchive:
+        src: /opt/gradle-{{ gradle_version }}-bin.zip
+        dest: /opt
+        remote_src: true
+        creates: /opt/gradle-{{ gradle_version }}/bin/gradle
+
+    - name: Put gradle on PATH
+      ansible.builtin.file:
+        src: /opt/gradle-{{ gradle_version }}/bin/gradle
+        dest: /usr/local/bin/gradle
+        state: link
+
+- name: Install Rust for the agent user
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile default --no-modify-path
+  args:
+    executable: /bin/bash
+    creates: "{{ agent_home }}/.cargo/bin/cargo"
+  become: true
+  become_user: "{{ agent_user }}"
+
+# Chrome for Testing at /usr/bin/google-chrome, which CHROME_PATH and
+# PUPPETEER_EXECUTABLE_PATH name, as in a cloud session.
+- name: Install Chrome for Testing
+  vars:
+    cloud_parity_chrome_dir: /opt/chrome-for-testing-{{ chrome_for_testing_version }}
+  block:
+    - name: Create its folder
+      ansible.builtin.file:
+        path: "{{ cloud_parity_chrome_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Unpack Chrome for Testing
+      ansible.builtin.unarchive:
+        src: https://storage.googleapis.com/chrome-for-testing-public/{{ chrome_for_testing_version }}/linux64/chrome-linux64.zip
+        dest: "{{ cloud_parity_chrome_dir }}"
+        remote_src: true
+        creates: "{{ cloud_parity_chrome_dir }}/chrome-linux64/chrome"
+
+    - name: Put it at /usr/bin/google-chrome
+      ansible.builtin.file:
+        src: "{{ cloud_parity_chrome_dir }}/chrome-linux64/chrome"
+        dest: /usr/bin/google-chrome
+        state: link
+        force: true
+
+# Playwright's browsers, with the system libraries they need, in the folder a
+# cloud session has them in. Agents cannot download browsers themselves: the
+# sandbox allows Playwright's download hosts no more than a cloud session
+# does, and agents cannot install system libraries.
+- name: Install the browser installer
+  ansible.builtin.copy:
+    src: pw-install
+    dest: /usr/local/sbin/pw-install
+    mode: "0755"
+
+- name: Install Playwright's Chromium and its system libraries
+  ansible.builtin.command: /usr/local/sbin/pw-install {{ playwright_version }} chromium
+  environment:
+    PATH: /opt/node24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PLAYWRIGHT_BROWSERS_PATH: "{{ cloud_parity_pw_browsers }}"
+    npm_config_cache: /root/.npm
+  args:
+    creates: "{{ cloud_parity_pw_browsers }}/.playwright-{{ playwright_version }}"
+
+- name: Record which Playwright the browsers are for
+  ansible.builtin.copy:
+    dest: "{{ cloud_parity_pw_browsers }}/.playwright-{{ playwright_version }}"
+    content: ""
+    mode: "0644"
+
+- name: Let everyone read and run the browsers
+  ansible.builtin.file:
+    path: "{{ cloud_parity_pw_browsers }}"
+    mode: u=rwX,go=rX
+    recurse: true
+
+- name: Create the folders sandboxed commands may write
+  ansible.builtin.file:
+    path: "{{ agent_home }}/{{ item }}"
+    state: directory
+    owner: "{{ agent_user }}"
+    group: "{{ agent_user }}"
+    mode: "0755"
+  loop: "{{ sandbox_agent_dirs + ['go/bin'] }}"
+
+# The sandbox can only hold a folder read-only if it is there when a session
+# starts; a missing one could be made, and written, by a sandboxed command.
+# nucleated keeps it private, so it is 0700.
+- name: Create nucleated's state folder before any session starts
+  ansible.builtin.file:
+    path: "{{ agent_home }}/.local/state/nucleated"
+    state: directory
+    owner: "{{ agent_user }}"
+    group: "{{ agent_user }}"
+    mode: "0700"
+
+# pnpm keeps its locks in the user's runtime folder, which is new at every
+# boot. These folders are made at login so the sandbox can let agents write
+# them.
+- name: Create pnpm's lock folders at every login
+  become: true
+  become_user: "{{ agent_user }}"
+  block:
+    - name: Create the user tmpfiles folder
+      ansible.builtin.file:
+        path: "{{ agent_home }}/.config/user-tmpfiles.d"
+        state: directory
+        mode: "0755"
+
+    - name: Declare pnpm's lock folders
+      ansible.builtin.copy:
+        dest: "{{ agent_home }}/.config/user-tmpfiles.d/pnpm.conf"
+        content: |
+          # pnpm's lock folders, made at login so the sandbox can let agents write them.
+          {% for name in cloud_parity_pnpm_lock_dirs %}
+          d %t/{{ name }} 0700 - - -
+          {% endfor %}
+        mode: "0644"
+
+    - name: Create them now
+      ansible.builtin.file:
+        path: /run/user/{{ agent_uid }}/{{ item }}
+        state: directory
+        mode: "0700"
+      loop: "{{ cloud_parity_pnpm_lock_dirs }}"
+
+# The same variables for anyone logging in. Agent sessions get them from the
+# session hook the claude role installs.
+- name: Set the cloud session's variables for login shells
+  ansible.builtin.copy:
+    dest: /etc/profile.d/cloud-parity.sh
+    content: |
+      # Written by the Nucarium box recipe (cloud_parity role).
+      export PLAYWRIGHT_BROWSERS_PATH={{ cloud_parity_pw_browsers }}
+      export CHROME_PATH=/usr/bin/google-chrome
+      export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
+      [ -d "$HOME/.cargo/bin" ] && export PATH="$PATH:$HOME/.cargo/bin"
+    mode: "0644"
