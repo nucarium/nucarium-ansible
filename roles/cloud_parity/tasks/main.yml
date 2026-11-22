@@ -142,22 +142,20 @@
 # cloud session has them in. Agents cannot download browsers themselves: the
 # sandbox allows Playwright's download hosts no more than a cloud session
 # does, and agents cannot install system libraries.
+- name: Install the browser installer
+  ansible.builtin.copy:
+    src: pw-install
+    dest: /usr/local/sbin/pw-install
+    mode: "0755"
+
 - name: Install Playwright's Chromium and its system libraries
-  ansible.builtin.command: >-
-    /opt/node24/bin/npx --yes playwright@{{ playwright_version }}
-    install --with-deps chromium
+  ansible.builtin.command: /usr/local/sbin/pw-install {{ playwright_version }} chromium
   environment:
     PATH: /opt/node24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     PLAYWRIGHT_BROWSERS_PATH: "{{ cloud_parity_pw_browsers }}"
     npm_config_cache: /root/.npm
-    # The default 30 seconds is too short for a box on a slow link.
-    PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "600000"
   args:
     creates: "{{ cloud_parity_pw_browsers }}/.playwright-{{ playwright_version }}"
-  register: cloud_parity_playwright
-  retries: 3
-  delay: 10
-  until: cloud_parity_playwright.rc == 0
 
 - name: Record which Playwright the browsers are for
   ansible.builtin.copy:

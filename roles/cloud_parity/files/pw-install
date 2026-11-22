@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Installs Playwright's browsers for one Playwright version into
+# $PLAYWRIGHT_BROWSERS_PATH, with their system libraries.
+#
+#   pw-install <playwright version> <browser>...
+#
+# Playwright's own installer downloads with Node, which on some networks
+# stalls where curl does not, so it is asked only for the system libraries
+# and, with --dry-run, for where each browser goes and where it comes from.
+# Each download is then fetched with curl and marked installed the way
+# Playwright marks it.
+set -euo pipefail
+
+version=$1
+shift
+: "${PLAYWRIGHT_BROWSERS_PATH:?set PLAYWRIGHT_BROWSERS_PATH}"
+playwright=(/opt/node24/bin/npx --yes "playwright@$version")
+
+"${playwright[@]}" install-deps "$@"
+
+"${playwright[@]}" install --dry-run "$@" 2>/dev/null \
+  | awk '/Install location:/ { location = $3 } /Download url:/ { print location, $3 }' \
+  | while read -r location url; do
+      [ -e "$location/INSTALLATION_COMPLETE" ] && continue
+      work=$(mktemp -d)
+      curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 -o "$work/download.zip" "$url"
+      rm -rf "$location"
+      mkdir -p "$location"
+      unzip -q "$work/download.zip" -d "$location"
+      rm -rf "$work"
+      touch "$location/INSTALLATION_COMPLETE"
+      echo "installed $location"
+    done
