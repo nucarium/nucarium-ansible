@@ -132,6 +132,10 @@
           - ('notify' in render_config) == (box_notify_url | length > 0)
           - box_notify_url | length == 0 or render_config.notify.url == box_notify_url
           - box_notify_url | length == 0 or ('token_file' in render_config.notify) == (secret_refs.box_notify_token | length > 0)
+          # With a container environment, git vetting is enforced, never
+          # report-only; without one the table is left out, for a nucleated
+          # older than 0.6.0.
+          - "render_config.git | default({}) == ({'vetting': 'enforce'} if nucarium_container_envs else {})"
         quiet: true
       vars:
         render_config: "{{ render_daemon.stdout | from_json }}"
@@ -467,6 +471,8 @@
         # Each mount's host path, and how it is mounted, in order.
         render_mounts:
           - [rw, "{{ nucleus_root }}"]
+          - [ro, "{{ nucleus_root }}/.claude"]
+          - [ro, "{{ nucleus_root }}/.seeds"]
           - [rw, "{{ env.config_dir | default('') }}"]
           - [ro, "{{ agent_home }}/.local/share/claude"]
           - [ro, "{{ agent_home }}/.local/bin"]

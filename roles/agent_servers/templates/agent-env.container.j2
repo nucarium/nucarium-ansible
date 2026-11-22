@@ -54,9 +54,19 @@ Environment=AGENT_SERVER_COMMAND={{ agent_home }}/.local/bin/agent-server
 # agree. Folders, never single files, for anything the host replaces.
 # Nothing over /root, where the setup script's files are.
 #
-# The nucleus, read-write; each bare repository's hooks read-only on top
-# (agent-env-start lists them).
+# The nucleus, read-write, with read-only on top of it what the host's own
+# environments run or read outside any sandbox: its .claude (the worktree
+# hooks a host agent server runs), its seed files, its AGENTS.md, and each
+# bare repository's hooks. agent-env-start lists AGENTS.md and the hooks
+# folders, as they are at the container's start. A repository cloned while
+# the container runs has writable hooks until its next start; nucleated
+# (0.6.0 and later) runs git on the host with core.hooksPath=/dev/null, so
+# no hook planted there runs. A repository's config stays writable
+# (nucleate hook-create records branches there); nucleated checks it before
+# it runs git there.
 Volume={{ nucleus_root }}:{{ nucleus_root }}
+Volume={{ nucleus_root }}/.claude:{{ nucleus_root }}/.claude:ro
+Volume={{ nucleus_root }}/.seeds:{{ nucleus_root }}/.seeds:ro
 PodmanArgs=$NUCARIUM_HOOK_VOLUMES
 # The login's configuration folder.
 Volume={{ env_config_dir }}:{{ env_config_dir }}

@@ -38,4 +38,12 @@ url = {{ day2_notify_url | to_json }}
 token_file = "{{ day2_notify_token_file }}"
 {% endif %}
 {% endif %}
+{% if nucarium_container_envs | length > 0 %}
+
+# A container environment can write the bare repositories' config, so the
+# daemon refuses to run git in a repository whose config or worktree
+# pointers hold anything but what git and nucleate write themselves.
+[git]
+vetting = "enforce"
+{% endif %}
 {% include 'nucleated-environments.toml.j2' %}

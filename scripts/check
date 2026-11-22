@@ -51,9 +51,10 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 echo "== refuse environments the recipe cannot set up"
 # Each must stop the playbook before anything is rendered, with a message
-# that says what is wrong.
+# that says what is wrong. A third argument is the nucleate_version to try
+# it with, 0.6.0 when there is none.
 refuse() {
-  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" 2>&1); then
+  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" -e "nucleate_version=${3:-0.6.0}" 2>&1); then
     echo "Accepted, but must be refused: $2"
     exit 1
   fi
@@ -68,6 +69,7 @@ refuse() {
 }
 refuse 'runtime is "docker", and must be host or container' '{"name": "main", "runtime": "docker"}'
 refuse 'network is "open", and must be none, limited or full' '{"name": "main", "network": "open"}'
+refuse 'runtime is container, which needs nucleate 0.6.0 or later, and nucleate_version is 0.5.9' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude-second"}' 0.5.9
 refuse 'runtime is container, which needs a config_dir of its own, such as /home/agent/.claude-main: the first login (~/.claude) stays on the host' '{"name": "main", "runtime": "container"}'
 refuse 'runtime is container, which needs a config_dir of its own' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude/"}'
 refuse 'keys the recipe does not know: netwrok' '{"name": "main", "netwrok": "full"}'

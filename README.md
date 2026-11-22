@@ -75,7 +75,8 @@ read, but it has not been run end to end on real hardware.
   reach a program that runs outside the sandbox. Two things still differ
   from a cloud session: agents are not root, so they cannot install system
   packages or start PostgreSQL and Redis themselves, and the box runs the
-  Ubuntu release it was installed with.
+  Ubuntu release it was installed with. In a container environment neither
+  is so: agents are root on Ubuntu 24.04, as in a cloud session.
 - **`nucleated`, the box daemon.** One service that sends a heartbeat, records
   when a session starts, works, needs you, stops or fails, fetches the
   repositories, removes finished sessions, and saves uncommitted work to a
@@ -172,7 +173,7 @@ Roles run in this order. Each has a tag of the same name.
 | `env_runtime` | For environments with `runtime: container`: their base image, Ubuntu 24.04 with what a Claude Code cloud session has, for root, built by the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and the pins in `group_vars/all.yml` as `localhost/nucarium-base:<hash>`, and tagged `:current`, built again only when the Containerfile or a pin changes; each one's two networks and its proxy; the builder of their images (`nucarium-env-build`, with the agent user's units `nucarium-env-build@<name>` and `nucarium-env-check@<name>`); and the box's Git identity, signing key and packages token as the containers see them, root's, in `/etc/nucarium/box/`. Does nothing on a box with no such environment. Runs before `env_setup` |
 | `env_setup` | Each environment's variables, setup script and runtime, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which records how the script went in `/var/lib/nucarium/environments/<name>.setup.json` and never restarts an agent server. On the host it runs the script at boot and whenever it changes. In a container it builds the environment's image, `localhost/nucarium-env-<name>`, from its base image and script, on its network, whenever one of them, the variables or the network changes, and at boot does nothing when the image is up to date. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
 | `agent_servers` | One agent server per entry in `environments`, under one shared memory cap: on the host `agent-server@<name>.service`, which waits while its environment's setup script runs; in a container `agent-env-<name>.service`, a quadlet unit, root's, that starts the environment's image with the nucleus and the box's tools mounted. Only the unit of an environment's `runtime` is enabled, the two never run at once, and a switch takes effect when the running one stops by itself. Enabled, not started |
-| `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token, and the configuration its hook reads inside a container (`~/.config/nucleated-hook/`, no token). Also the two jobs the daemon does not own: a weekly cleanup of container images (the environments' old image tags included), the pnpm store and the journal, and the nightly encrypted backup if configured |
+| `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token, the configuration its hook reads inside a container (`~/.config/nucleated-hook/`, no token), and, with a container environment, its check of each repository's git config enforced. Also the two jobs the daemon does not own: a weekly cleanup of container images (the environments' old image tags included), the pnpm store and the journal, and the nightly encrypted backup if configured |
 
 ## Reporting to Nucarium Watch
 
@@ -418,7 +419,16 @@ Choices this recipe makes where the product leaves room:
   is read-only to them, because `nucleated` runs git there outside the
   sandbox and a setting such as `core.fsmonitor` or `core.sshCommand` would
   run a command unconfined. So `git push -u` pushes but cannot record the
-  upstream. Say so in your `agent-context/` files.
+  upstream. Say so in your `agent-context/` files. In a container
+  environment `config` is writable (only `hooks/` is read-only), and
+  `nucleated` relies on its own check of each repository's config before it
+  runs git there.
+- **A container environment's server is held the same way.** Its container's
+  main process starts the server in a tmux session and lasts as long as it,
+  so `agent-env-<name>.service` too is active exactly while the server runs.
+  Its server runs in `/etc/nucarium/servers/<name>/`, which holds only the
+  worktree hooks, because Claude Code names a Remote Control server after its
+  folder: each environment then shows under its own name in the Claude app.
 - **The weekly disk cleanup stays outside the daemon.** `nucleated` cleans up
   sessions; container images, the pnpm store and the journal are pruned by
   `agent-gc.timer`.

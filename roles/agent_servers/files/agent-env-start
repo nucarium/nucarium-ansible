@@ -7,15 +7,16 @@
 # Stops the start, with a message, when the environment has no image yet:
 # nucarium-env-setup@<name>.service builds it, and starts this unit once it
 # is there. Otherwise writes <file>, which the unit reads for the
-# container's command line: one read-only mount for each bare repository's
-# hooks folder in the nucleus, on top of the nucleus the container writes, so
-# that nothing in the container plants a hook the host's git would run. A
-# repository added while the container runs gets its mount at the next
-# start.
+# container's command line: read-only mounts, on top of the nucleus the
+# container writes, of the nucleus's AGENTS.md, which host sessions read,
+# and of each bare repository's hooks folder, so that nothing in the
+# container plants a hook the host's git would run. A repository added while
+# the container runs gets its mount at the next start.
 #
 # Only a folder whose name a repository can have is mounted, and only when
-# neither it nor its hooks folder is a link: anything else would let a
-# session choose what the next container mounts.
+# neither it nor its hooks folder is a link; AGENTS.md only when it is a
+# file and not a link: anything else would let a session choose what the
+# next container mounts.
 set -euo pipefail
 
 name="${1:?usage: agent-env-start <name> <nucleus> <file>}"
@@ -35,6 +36,10 @@ if ! podman image exists "$image"; then
 fi
 
 volumes=()
+agents="$nucleus/AGENTS.md"
+if [ -f "$agents" ] && [ ! -L "$agents" ]; then
+  volumes+=("--volume=$agents:$agents:ro")
+fi
 for repo in "$nucleus"/.repos/*.git; do
   [ -e "$repo" ] || continue
   base=${repo##*/}
