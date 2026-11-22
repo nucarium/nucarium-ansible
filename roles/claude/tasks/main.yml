@@ -1,4 +1,24 @@
 ---
+# Root's, so that no session can change what the next session of any
+# environment starts with; mounted read-only into container environments.
+- name: Install the session-environment hook (GitHub token rule)
+  block:
+    - name: Create the folder of the box's own helpers
+      ansible.builtin.file:
+        path: "{{ nucarium_lib_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install the hook
+      ansible.builtin.copy:
+        src: session-env.sh
+        dest: "{{ claude_session_env }}"
+        owner: root
+        group: root
+        mode: "0755"
+
 - name: Claude Code for the agent user
   become: true
   become_user: "{{ agent_user }}"
@@ -11,14 +31,11 @@
         executable: /bin/bash
         creates: "{{ agent_home }}/.local/bin/claude"
 
-    - name: Create the folder for hooks
+    - name: Create the first login's configuration folder
       ansible.builtin.file:
-        path: "{{ agent_home }}/{{ item }}"
+        path: "{{ agent_home }}/.claude"
         state: directory
         mode: "0755"
-      loop:
-        - .claude
-        - .claude/hooks
 
     # One configuration folder per Claude login: ~/.claude for the first
     # environment, and each other environment's config_dir.
@@ -32,12 +49,8 @@
         loop_var: env
         label: "{{ env.name }}"
 
-    - name: Install the session-environment hook (GitHub token rule)
-      ansible.builtin.copy:
-        src: session-env.sh
-        dest: "{{ agent_home }}/.claude/hooks/session-env.sh"
-        mode: "0755"
-
+    # On the host the sandbox keeps each command in; in a container the
+    # container does, and the sandbox is off inside it.
     - name: Install each login's settings (sandbox, update channel, deny rules, hooks)
       ansible.builtin.template:
         src: settings.json.j2
@@ -47,6 +60,13 @@
       loop_control:
         loop_var: env
         label: "{{ env.name }}"
+
+    # Where earlier versions of the recipe kept the hook, which the agent
+    # user could rewrite. Every login's settings now name the one above.
+    - name: Remove the earlier copy of the session-environment hook
+      ansible.builtin.file:
+        path: "{{ agent_home }}/.claude/hooks/session-env.sh"
+        state: absent
 
     - name: Install the Terraform credentials helper
       ansible.builtin.copy:

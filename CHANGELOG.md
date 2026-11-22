@@ -4,6 +4,57 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## Environments in their own container
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+`runtime: container` now does what it says: the environment's agent server
+and every session it starts run in a rootless Podman container of the
+environment's own, as root on Ubuntu 24.04 with what a Claude Code cloud
+session has. Its setup script is built into the container's image once, as
+a cloud environment's is, and its network goes through its own proxy. An
+environment on the host runs exactly as before.
+
+### Settings changed
+
+No key is added, renamed or removed.
+
+| Setting | What changed |
+|---|---|
+| `runtime` | `container` runs the environment in its container (it used to build the base image only). It needs a `config_dir` of the environment's own: left out, or `~/.claude`, the playbook stops and says so, because the first login stays on the host. Switching takes effect when the environment's agent server next stops by itself (after about ten minutes with no session) or when you restart it, never mid-session, and the box never runs two servers for one login. |
+
+### Roles and tags
+
+| Role | What changed |
+|---|---|
+| `env_runtime` | Now runs before `env_setup`. Also installs the image builder for container environments (`~/.local/bin/nucarium-env-build`, with the agent user's units `nucarium-env-build@<name>` and `nucarium-env-check@<name>`), and writes the box's Git identity, commit signing (a copy of the box's signing key) and GitHub credential helper, and the packages token, root's, in `/etc/nucarium/box/`, which every container mounts read-only. |
+| `env_setup` | Writes each environment's `runtime` beside its variables, and for a container environment its base image (`image.env`) and its proxy's variables (`network.env`). `nucarium-env-setup@<name>` runs for every container environment, script or not: it builds `localhost/nucarium-env-<name>:<hash>` from the base image, the script, the variables and the network, in the agent user's own manager, tags it `:current`, and records the build in `<name>.setup.json` as before. A boot with nothing changed builds nothing; a failed build keeps the previous image. |
+| `agent_servers` | A quadlet unit per container environment, root's, in `/etc/containers/systemd/users/<uid>/agent-env-<name>.container`, giving `agent-env-<name>.service` in `agents.slice`. `agent-server@.service` conflicts with it, starts only while its environment is on the host, and hands over to it when it stops; the playbook enables the unit of each environment's runtime and disables the other without stopping it. The helpers both run are root's, in `/usr/local/lib/nucarium/`. Each container's server runs in `/etc/nucarium/servers/<name>/`, so the Claude app names it after its environment. |
+| `claude` | The session-environment hook moved from `~/.claude/hooks/session-env.sh`, which the agent user could rewrite, to `/usr/local/lib/nucarium/session-env.sh`, root's, for every environment; the old copy is removed. A container environment's settings turn Claude Code's sandbox off, the container being the boundary, and name `nucleated` by its full path. |
+| `day2` | `nucleated`'s configuration names `agent-env-<name>.service` as a container environment's unit. A tokenless copy of the environments for the hook inside containers, `~/.config/nucleated-hook/config.toml`. `agent-gc` also removes the environments' image tags that nothing uses: of the base image and of each container environment's, all but the one `:current` names, and every tag of an environment no longer in a container. |
+| `toolchain` | The GitHub credential helper is the one shared with the containers; its value is unchanged. |
+
+### A box built with an earlier copy of the recipe
+
+Nothing to do for an environment on the host. The next run moves the
+session hook to `/usr/local/lib/nucarium/` and rewrites each login's
+settings to name it.
+
+To move an environment into its container, give it its own `config_dir` if
+it has none, set `runtime: container` and run `ansible-playbook site.yml
+--tags env_runtime,env_setup,claude,workspace,agent_servers,day2`. Then sign
+it in by hand, once, as the closing message says:
+
+```bash
+systemctl --user start agent-env-<name>.service
+podman exec -it agent-env-<name> claude                         # sign in, trust the folder, /mcp, /exit
+podman exec -it agent-env-<name> tmux -L agent-<name> attach    # answer y to enable Remote Control
+```
+
+The first login (`~/.claude`) stays on the host. To move it too, make a new
+`config_dir` for it from a copy of `~/.claude` and `~/.claude.json` first.
+
 ## The base image of container environments
 
 This entry has no version number of its own: the release that carries it is

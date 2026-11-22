@@ -12,10 +12,14 @@ shell_files="
   scripts/check
   roles/agent_servers/files/agent-server
   roles/agent_servers/files/agent-server-stop
+  roles/agent_servers/files/agent-server-runtime
+  roles/agent_servers/files/agent-env-start
+  roles/agent_servers/files/agent-env-hold
   roles/claude/files/session-env.sh
   roles/claude/files/terraform-credentials-agentvault
   roles/day2/files/agent-gc
   roles/env_setup/files/nucarium-env-setup
+  roles/env_runtime/files/build/nucarium-env-build
 "
 
 echo "== syntax"
@@ -64,6 +68,8 @@ refuse() {
 }
 refuse 'runtime is "docker", and must be host or container' '{"name": "main", "runtime": "docker"}'
 refuse 'network is "open", and must be none, limited or full' '{"name": "main", "network": "open"}'
+refuse 'runtime is container, which needs a config_dir of its own, such as /home/agent/.claude-main: the first login (~/.claude) stays on the host' '{"name": "main", "runtime": "container"}'
+refuse 'runtime is container, which needs a config_dir of its own' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude/"}'
 refuse 'keys the recipe does not know: netwrok' '{"name": "main", "netwrok": "full"}'
 refuse 'variables is a set of NAME: value lines' '{"name": "main", "variables": ["NODE_ENV=test"]}'
 refuse 'not shell variable names (letters, digits and _, not starting with a digit): 1ST, NODE-ENV' '{"name": "main", "variables": {"OK": "1", "1ST": "x", "NODE-ENV": "test"}}'

@@ -1,5 +1,10 @@
 {
   "autoUpdatesChannel": "stable",
+{% if env_runtime == 'container' %}
+  "sandbox": {
+    "enabled": false
+  },
+{% else %}
   "sandbox": {
     "enabled": true,
     "autoAllowBashIfSandboxed": true,
@@ -12,6 +17,7 @@
     },
     "network": {{ claude_sandbox_network | to_json }}
   },
+{% endif %}
   "permissions": {
     "deny": [
       "Bash(terraform apply *)",
@@ -23,7 +29,7 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/session-env.sh {{ env.name }}", "timeout": 10 },
+          { "type": "command", "command": "{{ claude_session_env }} {{ env.name }}", "timeout": 10 },
           { "type": "command", "command": "{{ claude_nucleated_hook }} SessionStart --env {{ env.name }}", "async": true, "timeout": 5 }
         ]
       }

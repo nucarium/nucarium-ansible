@@ -1,0 +1,142 @@
+---
+# The agent server of each container environment: a quadlet file, root's
+# like the environment's network files, which Podman turns into the agent
+# user's unit agent-env-<name>.service, and the folder the server runs in.
+#
+# An environment moved back to the host keeps its quadlet file, without its
+# [Install] section, while its container still runs, so that the container
+# carries on and hands over to the host unit when it stops; the next run
+# after that removes the file. One that is no longer in the settings loses
+# its container and file at once, as it loses its host unit.
+
+- name: Look for the agent servers set up in containers
+  ansible.builtin.find:
+    paths: "{{ env_runtime_quadlet_dir }}"
+    patterns: agent-env-*.container
+  register: agent_servers_quadlets
+
+- name: Ask which of those are running
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, "agent-env-{{ item }}.service"]
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  loop: "{{ agent_servers_quadlet_names }}"
+  register: agent_servers_running
+  check_mode: false
+  changed_when: false
+  failed_when: false
+
+- name: Set up, keep or remove each one
+  vars:
+    # Running, starting, or waiting to start again after its server exited.
+    agent_servers_active: >-
+      {{ agent_servers_running.results | selectattr('stdout', 'in', ['active', 'activating', 'deactivating', 'reloading'])
+      | map(attribute='item') | list }}
+    # Container environments, and those moved to the host whose container
+    # still runs.
+    agent_servers_in_containers: >-
+      {{ environments | selectattr('name', 'in', nucarium_container_envs
+         + (agent_servers_active | intersect(environments | map(attribute='name')))) | list }}
+    # Everything else that has a quadlet file: gone from the settings, or
+    # back on the host with nothing running.
+    agent_servers_gone: "{{ agent_servers_quadlet_names | difference(agent_servers_in_containers | map(attribute='name')) }}"
+  block:
+    - name: Create root's folders for the quadlet files and the servers' folders
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ env_runtime_quadlet_dir }}"
+        - "{{ nucarium_servers_dir }}"
+      when: agent_servers_in_containers | length > 0
+
+    - name: Create each server's folder
+      become: true
+      ansible.builtin.file:
+        path: "{{ nucarium_servers_dir }}/{{ env.name }}/.claude"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ agent_servers_in_containers }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    # nucleate's worktree hooks, at the paths they have in the container.
+    - name: Register the worktree hooks in each server's folder
+      become: true
+      ansible.builtin.template:
+        src: server-settings.json.j2
+        dest: "{{ nucarium_servers_dir }}/{{ env.name }}/.claude/settings.json"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ agent_servers_in_containers }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    # Mounted into each container, so it has to be there first. The daemon
+    # keeps it private.
+    - name: Create nucleated's spool
+      become: true
+      become_user: "{{ agent_user }}"
+      ansible.builtin.file:
+        path: "{{ nucarium_nucleated_state_dir }}/spool"
+        state: directory
+        mode: "0700"
+      when: agent_servers_in_containers | length > 0
+
+    - name: Write each environment's agent server unit
+      become: true
+      ansible.builtin.template:
+        src: agent-env.container.j2
+        dest: "{{ env_runtime_quadlet_dir }}/agent-env-{{ env.name }}.container"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ agent_servers_in_containers }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    - name: Stop the containers of environments no longer in the settings
+      become: true
+      become_user: "{{ agent_user }}"
+      environment:
+        XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+      ansible.builtin.systemd_service:
+        name: agent-env-{{ item }}.service
+        scope: user
+        state: stopped
+      loop: "{{ agent_servers_gone | difference(environments | map(attribute='name')) }}"
+
+    - name: Remove the quadlet files and folders of the others
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ agent_servers_gone | map('regex_replace', '^(.*)$', env_runtime_quadlet_dir ~ '/agent-env-\1.container') | list
+        + agent_servers_gone | map('regex_replace', '^(.*)$', nucarium_servers_dir ~ '/\1') | list }}
+
+    # Quadlet makes the units from the files, and removes the units of
+    # removed files, when the user manager reloads. Nothing is started: the
+    # first start of each server is by hand (see the closing message), and
+    # after that its image's build or the next boot starts it.
+    - name: Reload the agent user's units
+      become: true
+      become_user: "{{ agent_user }}"
+      environment:
+        XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+      ansible.builtin.systemd_service:
+        scope: user
+        daemon_reload: true
+      when: agent_servers_in_containers | length > 0 or agent_servers_gone | length > 0

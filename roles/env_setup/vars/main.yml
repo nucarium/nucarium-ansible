@@ -1,12 +1,26 @@
 ---
 # Root's copy of each environment's setup script and variables, one folder per
 # environment: setup.sh is root's alone (0700); variables.sh is readable by
-# the agent user, whose session hook reads it.
+# the agent user, whose session hook reads it. Beside them, runtime (host or
+# container), and for a container environment image.env and network.env,
+# what its image is built from besides the script (tasks/container.yml). A
+# container environment has the folder mounted read-only.
 env_setup_etc_dir: /etc/nucarium/environments
 # What each environment is (<name>.json, written here) and how its setup
 # script last ran (<name>.setup.json, written by nucarium-env-setup), for
 # nucleated to report to Nucarium Watch.
 env_setup_state_dir: /var/lib/nucarium/environments
+
+# The environments whose setup unit runs: on the host, those with a setup
+# script; in a container, every one, since the unit builds its image.
+env_setup_runs: >-
+  {{ (environments | selectattr('setup_script', 'defined') | selectattr('setup_script') | map(attribute='name') | list
+  + nucarium_container_envs) | unique }}
+
+# A container environment's image is built in the agent user's Podman from
+# what root copies into this folder for each build, one folder per
+# environment (nucarium-env-setup).
+env_setup_build_dir: /var/lib/nucarium/env-build
 
 # <name>.json for one environment (the loop variable env). Counts, never
 # values: Watch is told how many variables and hosts there are, not what they

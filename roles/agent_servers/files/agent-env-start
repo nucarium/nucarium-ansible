@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Runs before agent-env-<name>.service starts the environment's container
+# (its ExecStartPre), as the agent user:
+#
+#   agent-env-start <name> <nucleus> <file>
+#
+# Stops the start, with a message, when the environment has no image yet:
+# nucarium-env-setup@<name>.service builds it, and starts this unit once it
+# is there. Otherwise writes <file>, which the unit reads for the
+# container's command line: one read-only mount for each bare repository's
+# hooks folder in the nucleus, on top of the nucleus the container writes, so
+# that nothing in the container plants a hook the host's git would run. A
+# repository added while the container runs gets its mount at the next
+# start.
+#
+# Only a folder whose name a repository can have is mounted, and only when
+# neither it nor its hooks folder is a link: anything else would let a
+# session choose what the next container mounts.
+set -euo pipefail
+
+name="${1:?usage: agent-env-start <name> <nucleus> <file>}"
+nucleus="${2:?usage: agent-env-start <name> <nucleus> <file>}"
+out="${3:?usage: agent-env-start <name> <nucleus> <file>}"
+case "$name" in -* | *[!a-z0-9-]*)
+  echo "agent-env-start: not an environment name: $name" >&2
+  exit 2
+  ;;
+esac
+
+image="localhost/nucarium-env-$name:current"
+if ! podman image exists "$image"; then
+  echo "Environment $name has no image yet ($image), so its agent server cannot start."
+  echo "nucarium-env-setup@$name.service builds it and then starts this unit; to see how that went: sudo journalctl -u nucarium-env-setup@$name.service"
+  exit 1
+fi
+
+volumes=()
+for repo in "$nucleus"/.repos/*.git; do
+  [ -e "$repo" ] || continue
+  base=${repo##*/}
+  hooks="$repo/hooks"
+  if ! [[ "$base" =~ ^[A-Za-z0-9._-]+\.git$ ]] || [ -L "$repo" ] || [ -L "$hooks" ] || [ ! -d "$hooks" ]; then
+    echo "agent-env-start: not mounting $hooks read-only: not a repository's own hooks folder" >&2
+    continue
+  fi
+  volumes+=("--volume=$hooks:$hooks:ro")
+done
+
+tmp=$(mktemp "$out.XXXXXX")
+printf 'NUCARIUM_HOOK_VOLUMES=%s\n' "${volumes[*]}" > "$tmp"
+mv -f "$tmp" "$out"

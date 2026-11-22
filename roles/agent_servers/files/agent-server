@@ -4,14 +4,19 @@
 #
 # agent-server-<name>.service starts this inside tmux and starts it again
 # when it exits, which the server does by design after about ten minutes
-# without a connection.
+# without a connection. In a container environment, agent-env-<name>.service
+# does the same inside the environment's container (AGENT_SERVER_RUNTIME is
+# container there).
 set -euo pipefail
 
 : "${AGENT_SERVER_ROOT:?set by the service}"
 : "${AGENT_SERVER_CAPACITY:?set by the service}"
 : "${AGENT_SERVER_PREFIX:?set by the service}"
 
-export PATH="$HOME/.local/bin:$HOME/.local/share/fnm/aliases/default/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
+# In a container its unit sets PATH: the image's, then the box's own tools.
+if [ "${AGENT_SERVER_RUNTIME:-host}" != container ]; then
+  export PATH="$HOME/.local/bin:$HOME/.local/share/fnm/aliases/default/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
+fi
 
 # After a power cut the box boots faster than the router, and a user service
 # cannot ask systemd to wait for the network.
@@ -24,9 +29,11 @@ done
 # this server a user unit, which systemd cannot order after one, so the wait
 # is here: while the script runs or waits to run, and no longer. A failed
 # script does not hold the server back, and a server already running is never
-# stopped for one.
+# stopped for one. In a container the script is in the image already, and
+# there is no systemd to ask.
 setup_unit="nucarium-env-setup@${AGENT_SERVER_NAME:-}.service"
 setup_pending() {
+  [ "${AGENT_SERVER_RUNTIME:-host}" != container ] || return 1
   [ -n "${AGENT_SERVER_NAME:-}" ] || return 1
   [ "$(systemctl show --property=ActiveState --value "$setup_unit" 2> /dev/null)" = activating ] ||
     [ -n "$(systemctl list-jobs --no-legend "$setup_unit" 2> /dev/null)" ]
@@ -34,6 +41,16 @@ setup_pending() {
 while setup_pending; do
   sleep 5
 done
+
+# A container's login is signed in by hand, once, from inside the container
+# (podman exec -it agent-env-<name> claude); until then the server waits
+# rather than exit and be restarted over and over.
+if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && ! claude auth status > /dev/null 2>&1; then
+  echo "Not signed in to Claude. Sign in with: podman exec -it agent-env-${AGENT_SERVER_NAME:-<name>} claude"
+  until claude auth status > /dev/null 2>&1; do
+    sleep 10
+  done
+fi
 
 cd "$AGENT_SERVER_ROOT"
 exec claude remote-control \

@@ -1,7 +1,43 @@
 ---
 # One agent server per entry in environments: a Claude login running one
-# Remote Control server over the nucleus. Each is an instance of the unit
-# agent-server@.service.
+# Remote Control server over the nucleus. On the host each is an instance of
+# the unit agent-server@.service; in a container (runtime: container) the
+# quadlet unit agent-env-<name>.service. Each environment has both units
+# once it has been in a container, and they conflict: only the one its
+# runtime names is enabled, and a switch takes effect when the running one
+# stops (agent-server-runtime).
+- name: Read the container environments' network settings
+  ansible.builtin.include_vars: "{{ role_path }}/../env_runtime/vars/proxy.yml"
+  when: env_runtime_quadlet_dir is not defined
+
+- name: Install the helpers both units run, root's
+  become: true
+  block:
+    - name: Create their folder
+      ansible.builtin.file:
+        path: "{{ nucarium_lib_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install the helpers
+      ansible.builtin.copy:
+        src: "{{ item.name }}"
+        dest: "{{ nucarium_lib_dir }}/{{ item.name }}"
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - name: agent-server-runtime
+          mode: "0755"
+        - name: agent-env-start
+          mode: "0755"
+        - name: agent-env-hold
+          mode: "0755"
+      loop_control:
+        label: "{{ item.name }}"
+
 - name: Agent servers, for the agent user
   become: true
   become_user: "{{ agent_user }}"
@@ -34,8 +70,8 @@
         mode: "0644"
 
     - name: Install the agent server unit
-      ansible.builtin.copy:
-        src: agent-server@.service
+      ansible.builtin.template:
+        src: agent-server@.service.j2
         dest: "{{ agent_home }}/.config/systemd/user/agent-server@.service"
         mode: "0644"
 
@@ -69,19 +105,32 @@
         state: absent
       loop: "{{ agent_servers_found.files | map(attribute='path') | map('basename') | map('regex_replace', '\\.env$', '') | difference(environments | map(attribute='name')) }}"
 
+- name: The agent servers in containers
+  ansible.builtin.import_tasks: container.yml
+
+- name: Agent servers on the host, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  block:
     # Enabled, not started: the very first start of each server has to be by
     # hand, in a terminal, to answer the folder-trust and Remote Control
     # prompts. A changed setting takes effect when its server next restarts;
-    # the playbook never restarts one, because that ends its sessions.
-    - name: Start each agent server at every boot
+    # the playbook never restarts one, because that ends its sessions. An
+    # environment in a container has its host unit disabled, not stopped: a
+    # server running there carries on until it stops by itself, and then
+    # hands over to the container.
+    - name: Start each agent server on the host at every boot
       ansible.builtin.systemd_service:
-        name: agent-server@{{ item.name }}.service
+        name: agent-server@{{ env.name }}.service
         scope: user
-        enabled: true
+        enabled: "{{ env_runtime == 'host' }}"
         daemon_reload: true
       loop: "{{ environments }}"
       loop_control:
-        label: "{{ item.name }}"
+        loop_var: env
+        label: "{{ env.name }}"
 
     # An earlier version of the recipe ran the server from this script, under
     # a unit that is now the daemon's (see the nucleated role).

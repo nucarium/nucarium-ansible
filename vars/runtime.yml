@@ -1,0 +1,54 @@
+---
+# What several roles share about where environments run, host or container.
+
+# The names of the environments that run in a container (runtime: container).
+nucarium_container_envs: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | map(attribute='name') | list }}"
+
+# PATH in a container environment: the base image's (ENV PATH in
+# roles/env_runtime/files/base/Containerfile, which tests/render.yml checks
+# this against), then the box's own tools, mounted read-only from the host
+# (claude, nucleate, nucleated), last, so that the image's and the setup
+# script's come first. Set by the container's unit, so that podman exec and
+# the agent server and its sessions all have it.
+nucarium_image_path: >-
+  /root/.local/bin:/opt/node{{ node_version }}/bin:/root/.cargo/bin:/usr/local/go/bin:/root/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:{{ agent_home }}/.local/bin
+
+# The box's own helpers, root's: the agent user can read and run them but
+# not change them, and every container environment has the folder mounted
+# read-only at the same path. session-env.sh (the claude role), and
+# agent-server-runtime, agent-env-start and agent-env-hold (the
+# agent_servers role).
+nucarium_lib_dir: /usr/local/lib/nucarium
+
+# What a container environment uses of the box's own Git and npm settings,
+# root's, mounted read-only at the same path (the env_runtime role): the Git
+# identity, commit signing and GitHub credential helper (gitconfig, which the
+# base image's /etc/gitconfig includes), the signing key pair, and the npm
+# token file NPM_CONFIG_GLOBALCONFIG names.
+nucarium_box_dir: /etc/nucarium/box
+
+# The folder each container environment's agent server runs in, one per
+# environment and named after it, root's: Claude Code names a Remote Control
+# server after its folder, so each shows in the Claude app under its
+# environment's name rather than all as "workspace". It holds only the
+# worktree hooks (.claude/settings.json), the nucleus's own being written for
+# the host.
+nucarium_servers_dir: /etc/nucarium/servers
+
+# The Git credential helper for github.com, on the box and in every
+# container environment: the GitHub App's short-lived token, which the broker
+# keeps fresh in /run/agent-tokens.
+nucarium_git_credential_helper: >-
+  !f() { [ "$1" = get ] && printf "username=x-access-token\npassword=%s\n"
+  "$(cat /run/agent-tokens/github)"; }; f
+
+# nucleated's state folder, which holds the spool its hooks write session
+# events to: the daemon's own default, written out. A container environment
+# writes the spool, mounted at the same path, and nothing else of it.
+nucarium_nucleated_state_dir: "{{ agent_home }}/.local/state/nucleated"
+
+# The configuration nucleated's hook reads inside a container environment
+# (NUCLEATED_CONFIG): the environments and the state folder, and no token.
+# A folder, mounted read-only, so that a rewritten file is seen; the day2
+# role writes it.
+nucarium_nucleated_hook_dir: "{{ agent_home }}/.config/nucleated-hook"

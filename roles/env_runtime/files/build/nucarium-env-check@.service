@@ -1,0 +1,11 @@
+# Written by the Nucarium box recipe (the env_runtime role). Says whether
+# the image of container environment %i is already built: it succeeds when
+# it is, and fails, with exit code 1, when it needs building, so that its
+# starter can read the answer. Started by nucarium-env-setup@%i.service; see
+# nucarium-env-build.
+[Unit]
+Description=Whether the image of environment %i is built
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/nucarium-env-build check %i

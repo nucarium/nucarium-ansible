@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Builds one container environment's image, localhost/nucarium-env-<name>,
+# as the agent user. Two units of the agent user's run it, and the root
+# runner nucarium-env-setup starts them and records how a build went:
+#
+#   nucarium-env-check@<name>.service   nucarium-env-build check <name>
+#       Exits 0 when the image is already built (and makes :current name
+#       it), 1 when it needs building, which fails the unit.
+#   nucarium-env-build@<name>.service   nucarium-env-build build <name>
+#       Builds it and tags it :current; exits as the setup script did.
+#
+# What to build is in /var/lib/nucarium/env-build/<name>/, root's:
+#   build.env  NUCARIUM_ENV_TAG, the image's tag, and NUCARIUM_ENV_BASE, the
+#              id of the base image it is built from.
+#   run/       setup.sh, variables.sh and network.env, mounted read-only at
+#              /run/nucarium while the script runs. No setup.sh: the image is
+#              the base image itself.
+#
+# The script runs once, as root with HOME=/root in /root, in a container of
+# the base image on the environment's own network (nucarium-<name>), with
+# the environment's variables and its proxy's, for at most 30 minutes. When
+# it exits 0 the container's filesystem becomes the image: what the script
+# wrote is in it, what it started is not running, and nothing of run/ is
+# there. It is a container rather than a podman build because a rootless
+# build cannot join a network.
+set -euo pipefail
+
+usage() {
+  echo "usage: nucarium-env-build check|build <name>" >&2
+  exit 2
+}
+step="${1:-}"
+name="${2:-}"
+case "$step" in check | build) ;; *) usage ;; esac
+case "$name" in '' | -* | *[!a-z0-9-]*) usage ;; esac
+
+dir="/var/lib/nucarium/env-build/$name"
+tag=$(sed -n 's/^NUCARIUM_ENV_TAG=\([0-9a-f]\{12\}\)$/\1/p' "$dir/build.env")
+base=$(sed -n 's/^NUCARIUM_ENV_BASE=\([0-9a-f]\{64\}\)$/\1/p' "$dir/build.env")
+if [ -z "$tag" ] || [ -z "$base" ]; then
+  echo "nucarium-env-build: $dir/build.env does not say what to build." >&2
+  exit 1
+fi
+image="localhost/nucarium-env-$name"
+ref="$image:$tag"
+
+if [ "$step" = check ]; then
+  if podman image exists "$ref"; then
+    podman tag "$ref" "$image:current"
+    exit 0
+  fi
+  exit 1
+fi
+
+if [ ! -f "$dir/run/setup.sh" ]; then
+  podman tag "$base" "$ref" "$image:current"
+  echo "The image of environment $name is the base image ($ref)."
+  exit 0
+fi
+
+container="nucarium-env-build-$name"
+podman rm --force --ignore "$container" > /dev/null
+
+# In the background, so that a stop reaches the script: the container is
+# stopped, which sends its script TERM, and KILL ten seconds later. In this
+# unit's own cgroup (--cgroups=split), so inside the agent servers' memory
+# cap and stopped with the unit.
+podman run --name "$container" --pull=never --cgroups=split --network "nucarium-$name" \
+  --volume "$dir/run:/run/nucarium:ro" \
+  "$base" bash -c 'set -a; . /run/nucarium/network.env; . /run/nucarium/variables.sh; set +a
+    export HOME=/root; cd /root && exec timeout --kill-after=60 1800 bash /run/nucarium/setup.sh < /dev/null' &
+child=$!
+stopping=
+# shellcheck disable=SC2329  # called by the trap below
+on_stop() {
+  stopping=1
+  podman stop --ignore --time 10 "$container" > /dev/null 2>&1 || true
+}
+trap on_stop TERM INT HUP
+rc=0
+while :; do
+  rc=0
+  wait "$child" || rc=$?
+  # wait returns early when the trap ran; the container may still be going.
+  kill -0 "$child" 2> /dev/null || break
+done
+trap - TERM INT HUP
+
+if [ "$rc" -eq 0 ] && [ -z "$stopping" ]; then
+  # The base image's own command, not the script's.
+  cmd=$(podman image inspect --format '{{json .Config.Cmd}}' "$base")
+  change=()
+  [ "$cmd" = null ] || change=(--change "CMD $cmd")
+  podman commit --quiet "${change[@]}" "$container" "$ref" > /dev/null
+  podman tag "$ref" "$image:current"
+  echo "Built the image of environment $name: $ref, now $image:current."
+fi
+podman rm --force --ignore "$container" > /dev/null
+exit "$rc"
