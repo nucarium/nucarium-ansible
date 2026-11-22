@@ -1,7 +1,26 @@
 ---
 - name: Rebuild the boot image
+  # Every installed kernel, which is every one with a vmlinuz in /boot: the
+  # running one and any newer one waiting for the next boot. Not every folder
+  # in /lib/modules: a removed kernel leaves its folder behind, and dracut
+  # fails on it.
   ansible.builtin.shell: |
-    if command -v dracut >/dev/null; then dracut -f --regenerate-all; else update-initramfs -u -k all; fi
+    set -eu
+    found=0
+    for kernel in /boot/vmlinuz-*; do
+      [ -e "$kernel" ] || continue
+      version=${kernel#/boot/vmlinuz-}
+      [ -d "/lib/modules/$version" ] || continue
+      found=1
+      if command -v dracut >/dev/null; then
+        dracut -f --kver "$version"
+      else
+        update-initramfs -u -k "$version"
+      fi
+    done
+    [ "$found" = 1 ] || { echo "No installed kernel found in /boot" >&2; exit 1; }
+  args:
+    executable: /bin/bash
   changed_when: true
 
 - name: Update the boot menu
