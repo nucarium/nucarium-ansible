@@ -25,6 +25,6 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       # Syntax-check of both playbooks, ansible-lint, yamllint, shellcheck,
-      # and a render of every template from the example settings. No box is
+      # the check-mode probe check, and a render of every template from the example settings. No box is
       # involved: nothing here connects anywhere.
       - run: scripts/check

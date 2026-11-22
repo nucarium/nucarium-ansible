@@ -222,6 +222,11 @@ ansible-playbook site.yml --tags workspace   # one role
 ansible-playbook site.yml --tags claude,day2
 ```
 
+A dry run (`--check`) changes nothing, but it still runs the commands that
+only look: the Tailscale state, the disk's TPM binding, the command sandbox,
+the Watch sign-in, the backup repository and the like. What it shows is then
+what a real run would do.
+
 | To | Change | Then run |
 |---|---|---|
 | Make another repository available | `repos` (and the GitHub App's selected repositories) | `--tags workspace` |
@@ -296,7 +301,8 @@ PATH="$PWD/.venv/bin:$PATH" scripts/check
 ```
 
 It syntax-checks both playbooks, runs `ansible-lint`, `yamllint` and
-`shellcheck`, and renders every template from the example settings into
+`shellcheck`, fails if a dry run would read the result of a command it
+skipped, and renders every template from the example settings into
 `out/render/`, in two shapes, so you can read exactly what a box would
 receive. It reads `nucleated`'s rendered configuration back as TOML and
 checks it against the settings. The Build workflow (`.github/workflows/build.yml`) runs the same
