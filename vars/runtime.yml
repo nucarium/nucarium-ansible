@@ -4,6 +4,11 @@
 # The names of the environments that run in a container (runtime: container).
 nucarium_container_envs: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | map(attribute='name') | list }}"
 
+# The clone address of one entry of repos (the loop variable item): an entry
+# with a slash names its owner (other-org/tools), a bare name belongs to
+# github_org. roles/env_setup/templates/repos.j2 writes the same address.
+nucarium_repo_url: "https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git"
+
 # The first release of nucleate and nucleated in which both check a bare
 # repository's git config (an allowlist of keys) and worktree pointers before
 # they run git there, and run git with core.hooksPath=/dev/null. A container
@@ -11,14 +16,14 @@ nucarium_container_envs: "{{ environments | selectattr('runtime', 'defined') | s
 # older nucleate_version.
 nucleate_minimum_for_containers: "0.7.0"
 
-# The nucleus's own files that the box's host environments read or run
-# outside any sandbox, which every container environment gets read-only and
-# does not start without (agent-env-start checks the same list): the worktree
-# hooks a host agent server runs (.claude/settings.json, in .claude/), the
-# project MCP servers it starts (.mcp.json), the instructions host sessions
-# read (AGENTS.md, CLAUDE.md), and the seed files. A file the playbook writes
-# there it writes in place, so that a running container's read-only mount of
-# it stays on the same file.
+# The files at the root of a container environment's own nucleus
+# ({{ agent_home }}/workspace-<name>, which the workspace role makes) that
+# its container gets read-only and does not start without (agent-env-start
+# checks the same list), so that no session plants there what later sessions
+# and servers read as instructions or run as hooks: .claude/ (with the
+# worktree hooks, .claude/settings.json), .mcp.json, AGENTS.md, CLAUDE.md
+# and the seed files. A file the playbook writes there it writes in place,
+# so that a running container's read-only mount of it stays on the same file.
 nucarium_nucleus_protected:
   - .claude
   - .seeds

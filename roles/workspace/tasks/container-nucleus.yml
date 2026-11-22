@@ -1,0 +1,131 @@
+---
+# Each container environment's own nucleus, {{ agent_home }}/workspace-<name>,
+# the only one its container mounts: its own bare clones of the box's
+# repositories, its own sessions, its own .claude/, AGENTS.md, CLAUDE.md,
+# .mcp.json and seed files. Nothing a container writes reaches another
+# environment's sessions, or anything the host's agent servers read.
+#
+# The host makes it and clones into it only while it is new: before any
+# container has run there, git on the host meets nothing a container wrote.
+# After that the host runs no git in it but nucleated's, which checks each
+# repository first; a repository added to repos later is cloned by the
+# container itself, at its agent server's next start, from the list the
+# env_setup role writes.
+- name: The container environments' own nuclei, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    PATH: "{{ agent_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+  vars:
+    workspace_container_envs: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
+    # Those whose nucleus did not exist when this run began.
+    workspace_new_nuclei: "{{ workspace_nuclei_found.results | rejectattr('stat.exists') | map(attribute='env.name') | list }}"
+  block:
+    - name: Look for each one
+      ansible.builtin.stat:
+        path: "{{ env_nucleus }}"
+        get_checksum: false
+      loop: "{{ workspace_container_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+      register: workspace_nuclei_found
+
+    - name: Create each new one
+      ansible.builtin.command: nucleate --root {{ env_nucleus }} init
+      args:
+        creates: "{{ env_nucleus }}/.repos"
+      loop: "{{ workspace_container_envs | selectattr('name', 'in', workspace_new_nuclei) | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    - name: Clone the repositories into each new one
+      ansible.builtin.command: nucleate --root {{ env_nucleus }} clone {{ nucarium_repo_url }}
+      args:
+        creates: "{{ env_nucleus }}/.repos/{{ item | basename }}.git"
+      vars:
+        env: "{{ outer.0 }}"
+        item: "{{ outer.1 }}"
+      loop: "{{ workspace_container_envs | selectattr('name', 'in', workspace_new_nuclei) | product(repos) | list }}"
+      loop_control:
+        loop_var: outer
+        label: "{{ outer.0.name }}: {{ outer.1 }}"
+
+    # Read-only in the container, which does not start without them
+    # (nucarium_nucleus_protected), so that it cannot plant hooks or
+    # instructions there either.
+    - name: Create the folders the recipe adds to each
+      ansible.builtin.file:
+        path: "{{ env_nucleus }}/{{ outer.1 }}"
+        state: directory
+        mode: "0755"
+      vars:
+        env: "{{ outer.0 }}"
+      loop: "{{ workspace_container_envs | product(['.seeds', '.claude']) | list }}"
+      loop_control:
+        loop_var: outer
+        label: "{{ outer.0.name }}: {{ outer.1 }}"
+
+    # nucleate's worktree hooks, at the paths they have in the container.
+    # The container's server runs from its own folder (the agent_servers
+    # role), so nothing runs these; they are what a session there finds.
+    - name: Register the worktree hooks at each one's root
+      ansible.builtin.template:
+        src: nucleus-settings.json.j2
+        dest: "{{ env_nucleus }}/.claude/settings.json"
+        mode: "0644"
+      vars:
+        workspace_nucleate: "{{ agent_home }}/.local/bin/nucleate"
+      loop: "{{ workspace_container_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    # Written in place, never replaced, so that the container's read-only
+    # mount of the file stays on it and sees the new text from its next
+    # start (a replaced file would leave the mount on the old one).
+    - name: Look at each one's instructions
+      ansible.builtin.stat:
+        path: "{{ env_nucleus }}/AGENTS.md"
+        checksum_algorithm: sha1
+      loop: "{{ workspace_container_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+      register: workspace_container_agents_md
+      when: (playbook_dir ~ '/agent-context/AGENTS.md') is file
+
+    - name: Install the nucleus instructions in each
+      ansible.builtin.command:
+        argv: [sh, -c, 'cat > "$1"', sh, "{{ env_nucleus }}/AGENTS.md"]
+        stdin: "{{ workspace_agents_source }}"
+        stdin_add_newline: false
+      vars:
+        env: "{{ item.env }}"
+        workspace_agents_source: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/agent-context/AGENTS.md', rstrip=false) }}"
+      loop: "{{ workspace_container_agents_md.results | reject('skipped') | list }}"
+      loop_control:
+        label: "{{ item.env.name }}"
+      changed_when: true
+      when: not item.stat.islnk | default(false) and item.stat.checksum | default('') != workspace_agents_source | hash('sha1')
+
+    - name: Make sure each has the files its container needs, empty ones when you have none
+      ansible.builtin.copy:
+        content: "{{ outer.1.content }}"
+        dest: "{{ env_nucleus }}/{{ outer.1.path }}"
+        mode: "0644"
+        force: false
+      vars:
+        env: "{{ outer.0 }}"
+        workspace_protected_files:
+          - path: AGENTS.md
+            content: ""
+          - path: CLAUDE.md
+            content: ""
+          - path: .mcp.json
+            content: "{\"mcpServers\": {}}\n"
+      loop: "{{ workspace_container_envs | product(workspace_protected_files) | list }}"
+      loop_control:
+        loop_var: outer
+        label: "{{ outer.0.name }}: {{ outer.1.path }}"

@@ -1,6 +1,7 @@
 """agent-env-start, run as a container environment's unit runs it before the
 container starts: it refuses to start when one of the nucleus's files the
-container gets read-only is missing, a link or the wrong kind.
+container gets read-only is missing, a link or the wrong kind, and otherwise
+lists each bare repository's hooks folder to mount read-only.
 
 podman is a stand-in on PATH that says every image exists.
 """
@@ -22,6 +23,7 @@ class AgentEnvStart(unittest.TestCase):
         self.nucleus = os.path.join(root, "workspace")
         os.makedirs(os.path.join(self.nucleus, ".claude"))
         os.makedirs(os.path.join(self.nucleus, ".seeds"))
+        os.makedirs(os.path.join(self.nucleus, ".repos", "web.git", "hooks"))
         for name in (".claude/settings.json", ".mcp.json", "AGENTS.md", "CLAUDE.md"):
             with open(os.path.join(self.nucleus, name), "w") as f:
                 f.write("{}\n")
@@ -32,13 +34,14 @@ class AgentEnvStart(unittest.TestCase):
             f.write("#!/bin/sh\nexit 0\n")
         os.chmod(podman, stat.S_IRWXU)
         self.env = dict(os.environ, PATH=bin_dir + os.pathsep + os.environ["PATH"])
+        self.out = os.path.join(root, "volumes")
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def run_start(self):
         return subprocess.run(
-            ["bash", SCRIPT, "main", self.nucleus],
+            ["bash", SCRIPT, "main", self.nucleus, self.out],
             env=self.env, capture_output=True, text=True,
         )
 
@@ -49,11 +52,22 @@ class AgentEnvStart(unittest.TestCase):
         done = self.run_start()
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertIn(f"{name} in the nucleus is {why}", done.stdout)
+        self.assertFalse(os.path.exists(self.out))
 
-    def test_starts_when_every_file_is_there(self):
+    def test_lists_the_hooks_of_each_repository(self):
         done = self.run_start()
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertEqual(done.stdout, "")
+        hooks = self.path(".repos/web.git/hooks")
+        with open(self.out) as f:
+            self.assertEqual(f.read(), f"NUCARIUM_HOOK_VOLUMES=--volume={hooks}:{hooks}:ro\n")
+
+    def test_skips_a_repository_whose_hooks_are_a_link(self):
+        os.makedirs(self.path(".repos/odd.git"))
+        os.symlink(self.path(".seeds"), self.path(".repos/odd.git/hooks"))
+        done = self.run_start()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        with open(self.out) as f:
+            self.assertNotIn("odd.git", f.read())
 
     def test_refuses_a_missing_claude_md(self):
         os.remove(self.path("CLAUDE.md"))

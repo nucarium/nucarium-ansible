@@ -1,0 +1,6 @@
+# nucleate's configuration in container environment {{ env.name }}
+# (NUCLEATE_CONFIG): its own nucleus, the only one its container has.
+# Written by the Nucarium box recipe; the next run rewrites this file.
+root = "{{ env_nucleus }}"
+# The broker's short-lived GitHub token, for the merged-pull-request check.
+github_token_file = "/run/agent-tokens/github"

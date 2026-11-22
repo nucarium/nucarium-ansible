@@ -42,6 +42,18 @@ while setup_pending; do
   sleep 5
 done
 
+# A repository added to the box's settings after the container's own nucleus
+# was made is cloned here, inside the container: the host runs no git in
+# this nucleus but nucleated's, which checks each repository first.
+if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && [ -r "${AGENT_SERVER_REPOS:-}" ]; then
+  while read -r url; do
+    [ -n "$url" ] || continue
+    repo=${url##*/}
+    [ -e "${AGENT_SERVER_NUCLEUS:?set by the unit}/.repos/$repo" ] && continue
+    nucleate clone "$url" > /dev/null || echo "Could not clone $url into this environment's nucleus; it is tried again at the next start."
+  done < "$AGENT_SERVER_REPOS"
+fi
+
 # nucleate's MCP server, for the login in user scope, as the playbook
 # registers it on the host: a container's login is not the host's to touch.
 if [ "${AGENT_SERVER_RUNTIME:-host}" = container ]; then

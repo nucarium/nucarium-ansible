@@ -3,7 +3,10 @@
 # script and variables: the base image (image.env) and the variables that
 # send its build through its proxy (network.env). Root's, beside the script,
 # so that nucarium-env-setup builds the image from them, and builds a new
-# one when one of them changes. An environment on the host has neither.
+# one when one of them changes. Also what its container reads of its own
+# nucleus: nucleate's configuration (nucleate.toml) and the repositories it
+# offers (repos, one clone address per line), which its agent server clones
+# when its nucleus lacks one. An environment on the host has none of these.
 
 - name: Read the settings of the container environments' network
   ansible.builtin.include_vars: "{{ role_path }}/../env_runtime/vars/proxy.yml"
@@ -68,11 +71,24 @@
     label: "{{ env.name }}"
   register: env_setup_network_env
 
+- name: Write each container environment's nucleate configuration and repositories
+  ansible.builtin.template:
+    src: "{{ item.1 }}.j2"
+    dest: "{{ env_setup_etc_dir }}/{{ item.0.name }}/{{ item.1 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    env: "{{ item.0 }}"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | product(['nucleate.toml', 'repos']) | list }}"
+  loop_control:
+    label: "{{ item.0.name }}: {{ item.1 }}"
+
 - name: Remove them for each environment on the host
   ansible.builtin.file:
     path: "{{ env_setup_etc_dir }}/{{ item.0.name }}/{{ item.1 }}"
     state: absent
-  loop: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | product(['image.env', 'network.env']) | list }}"
+  loop: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | product(['image.env', 'network.env', 'nucleate.toml', 'repos']) | list }}"
   loop_control:
     label: "{{ item.0.name }}: {{ item.1 }}"
   register: env_setup_left_container

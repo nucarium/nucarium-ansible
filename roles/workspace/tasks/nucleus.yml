@@ -1,7 +1,9 @@
 ---
 # The nucleus is the workspace folder: bare clones in .repos/, one folder per
 # session in .worktrees/, seed files in .seeds/. nucleate builds and manages
-# it; this role only says where it is and which repositories it offers.
+# it; this role only says where it is and which repositories it offers. The
+# environments on the host share this one; each container environment has
+# its own (container-nucleus.yml).
 - name: The nucleus, for the agent user
   become: true
   become_user: "{{ agent_user }}"
@@ -30,67 +32,26 @@
         mode: "0644"
 
     - name: Register the worktree hooks at the nucleus root
-      ansible.builtin.copy:
-        src: nucleus-settings.json
+      ansible.builtin.template:
+        src: nucleus-settings.json.j2
         dest: "{{ nucleus_root }}/.claude/settings.json"
         mode: "0644"
-
-    # Written in place, never replaced, so that a container environment's
-    # read-only mount of it stays on this file and sees the new text from its
-    # next start (a replaced file would leave the mount on the old one).
-    - name: Look at the nucleus instructions on the box
-      ansible.builtin.stat:
-        path: "{{ nucleus_root }}/AGENTS.md"
-        checksum_algorithm: sha1
-      register: workspace_agents_md
-      when: (playbook_dir ~ '/agent-context/AGENTS.md') is file
-
-    - name: Remove a link where the instructions belong
-      ansible.builtin.file:
-        path: "{{ nucleus_root }}/AGENTS.md"
-        state: absent
-      when:
-        - workspace_agents_md is not skipped
-        - workspace_agents_md.stat.islnk | default(false)
+      vars:
+        workspace_nucleate: $HOME/.local/bin/nucleate
 
     - name: Install the nucleus instructions
-      ansible.builtin.command:
-        argv: [sh, -c, 'cat > "$1"', sh, "{{ nucleus_root }}/AGENTS.md"]
-        stdin: "{{ workspace_agents_source }}"
-        stdin_add_newline: false
-      vars:
-        workspace_agents_source: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/agent-context/AGENTS.md', rstrip=false) }}"
-      changed_when: true
-      when:
-        - workspace_agents_md is not skipped
-        - workspace_agents_md.stat.islnk | default(false) or workspace_agents_md.stat.checksum | default('') != workspace_agents_source | hash('sha1')
-
-    # A container environment gets these read-only and does not start without
-    # them (nucarium_nucleus_protected), so that it cannot plant what the
-    # host's environments would read: empty ones when you have none.
-    - name: Make sure the nucleus has the files container environments need
       ansible.builtin.copy:
-        content: "{{ item.content }}"
-        dest: "{{ nucleus_root }}/{{ item.path }}"
+        src: "{{ playbook_dir }}/agent-context/AGENTS.md"
+        dest: "{{ nucleus_root }}/AGENTS.md"
         mode: "0644"
-        force: false
-      loop:
-        - path: AGENTS.md
-          content: ""
-        - path: CLAUDE.md
-          content: ""
-        - path: .mcp.json
-          content: "{\"mcpServers\": {}}\n"
-      loop_control:
-        label: "{{ item.path }}"
-      when: nucarium_container_envs | length > 0
+      when: (playbook_dir ~ '/agent-context/AGENTS.md') is file
 
     # An entry with a slash names its owner (other-org/tools); a bare name
     # belongs to github_org. Sessions see each repo under its GitHub slug.
     - name: Make each repository available
       ansible.builtin.command: >-
         nucleate clone
-        https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git
+        {{ nucarium_repo_url }}
       args:
         creates: "{{ nucleus_root }}/.repos/{{ item | basename }}.git"
       loop: "{{ repos }}"
@@ -143,3 +104,6 @@
         label: "{{ found.env.name }}"
       changed_when: true
       when: found.rc != 0 or (agent_home ~ '/.local/bin/nucleate mcp') not in found.stdout
+
+- name: Each container environment's own nucleus
+  ansible.builtin.import_tasks: container-nucleus.yml

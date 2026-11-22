@@ -33,6 +33,7 @@
     env_variables: "{{ env.variables | default({}, true) }}"
     env_setup_script: "{{ env.setup_script | default('', true) }}"
     env_unit: "{{ 'agent-env-' ~ env.name ~ '.service' if env_runtime == 'container' else 'agent-server@' ~ env.name ~ '.service' }}"
+    env_nucleus: "{{ agent_home ~ '/workspace-' ~ env.name if env_runtime == 'container' else nucleus_root }}"
     watch_console_url: https://app.nucarium.com
     render_per_server:
       - src: ../roles/agent_servers/templates/agent-server.env.j2
@@ -48,6 +49,10 @@
         dest: server-settings.json
       - src: ../roles/env_setup/templates/network.env.j2
         dest: network.env
+      - src: ../roles/env_setup/templates/nucleate.toml.j2
+        dest: nucleate.toml
+      - src: ../roles/env_setup/templates/repos.j2
+        dest: repos
     # Where the env_runtime role's files are, which its vars read.
     env_runtime_role_dir: "{{ playbook_dir }}/../roles/env_runtime"
     # Stand-ins for values the real run reads from the box.
@@ -128,7 +133,10 @@
           # on the host, as before; in a container, its quadlet's unit.
           - render_config.environment | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='unit') | list == render_host_units
           - render_config.environment | selectattr('name', 'in', nucarium_container_envs) | map(attribute='unit') | list == render_container_units
-          - render_config.environment | map(attribute='root') | unique | list == [nucleus_root]
+          # The host's environments share the nucleus; each container
+          # environment has its own.
+          - render_config.environment | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='root') | unique | list in [[], [nucleus_root]]
+          - render_config.environment | selectattr('name', 'in', nucarium_container_envs) | map(attribute='root') | list == render_container_nuclei
           - render_config.environment | map(attribute='config_dir') | list == environments | map(attribute='config_dir', default=agent_home ~ '/.claude') | list
           - ('ups' in render_config) == (nut_enabled | bool)
           - not (nut_enabled | bool) or render_config.ups.name == ups_name ~ '@localhost'
@@ -145,6 +153,7 @@
         render_host_units: >-
           {{ environments | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='name')
           | map('regex_replace', '^(.*)$', 'agent-server@\1.service') | list }}
+        render_container_nuclei: "{{ nucarium_container_envs | map('regex_replace', '^', agent_home ~ '/workspace-') | list }}"
         render_container_units: "{{ nucarium_container_envs | map('regex_replace', '^(.*)$', 'agent-env-\\1.service') | list }}"
 
     # What nucleated's hook reads inside a container: the same environments,
@@ -431,7 +440,13 @@
           - render_env.PATH == render_image_path ~ ':' ~ agent_home ~ '/.local/bin'
           - render_env.CLAUDE_CONFIG_DIR == env.config_dir
           - render_env.DISABLE_AUTOUPDATER == '1'
-          - render_env.NUCLEATE_CONFIG == agent_home ~ '/.config/nucleate/config.toml'
+          - render_env.NUCLEATE_CONFIG == '/etc/nucarium/environments/' ~ env.name ~ '/nucleate.toml'
+          - render_env.AGENT_SERVER_NUCLEUS == render_nucleus
+          - render_env.AGENT_SERVER_REPOS == '/etc/nucarium/environments/' ~ env.name ~ '/repos'
+          # Its own nucleus only: nothing of the one the host's environments
+          # share is mounted, named or passed.
+          - render_text is not search(render_shared)
+          - "('ExecStartPre=/usr/local/lib/nucarium/agent-env-start ' ~ env.name ~ ' ' ~ render_nucleus ~ ' %t/agent-env-' ~ env.name ~ '.volumes') in render_lines"
           - render_env.NUCLEATED_CONFIG == agent_home ~ '/.config/nucleated-hook/config.toml'
           - render_env.NPM_CONFIG_GLOBALCONFIG == '/etc/nucarium/box/npmrc'
           - render_env.AGENT_SERVER_RUNTIME == 'container'
@@ -444,14 +459,14 @@
           - render_volumes | map('split', ':') | map('first') | list == render_mounts | map('last') | list
           - render_volumes | map('split', ':') | map('last') | map('regex_replace', '^/.*$', 'rw') | list == render_mounts | map('first') | list
           - render_volumes | map('split', ':') | map(attribute=1) | select('match', '^/root(/|$)') | list == []
-          - render_lines | select('match', '(PodmanArgs|EnvironmentFile)=') | list == []
+          - "'PodmanArgs=$NUCARIUM_HOOK_VOLUMES' in render_lines"
           - "('WorkingDir=/etc/nucarium/servers/' ~ env.name) in render_lines"
           - "'Exec=/usr/local/lib/nucarium/agent-env-hold' in render_lines"
           - "('Conflicts=agent-server@' ~ env.name ~ '.service') in render_lines"
           - "('Wants=nucarium-proxy-' ~ env.name ~ '.service') in render_lines"
           - render_lines.index('Slice=agents.slice') > render_lines.index('[Service]')
           - "('ExecCondition=/usr/local/lib/nucarium/agent-server-runtime is ' ~ env.name ~ ' container') in render_lines"
-          - "('ExecStartPre=/usr/local/lib/nucarium/agent-env-start ' ~ env.name ~ ' ' ~ nucleus_root) in render_lines"
+          - "('EnvironmentFile=-%t/agent-env-' ~ env.name ~ '.volumes') in render_lines"
           - "('ExecStopPost=/usr/local/lib/nucarium/agent-server-runtime hand-over ' ~ env.name ~ ' container') in render_lines"
           - "'Restart=always' in render_lines"
           - "'StartLimitBurst=5' in render_lines"
@@ -461,7 +476,12 @@
           - ('WantedBy=default.target' in render_lines) == (env.name in nucarium_container_envs)
         quiet: true
       vars:
-        render_lines: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.agent-env.container').split('\n') | map('trim') | list }}"
+        render_text: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.agent-env.container') }}"
+        render_lines: "{{ render_text.split('\n') | map('trim') | list }}"
+        render_nucleus: "{{ agent_home }}/workspace-{{ env.name }}"
+        # The shared nucleus's path, as a whole path, not the start of the
+        # environment's own (workspace-<name>).
+        render_shared: "{{ (nucleus_root | regex_escape) ~ '([:/\\s]|$)' }}"
         render_env: >-
           {{ render_lines | select('match', 'Environment=') | map('regex_replace', '^Environment=', '')
           | map('split', '=', 1) | items2dict(key_name=0, value_name=1) }}
@@ -472,16 +492,15 @@
           | regex_search('(?m)^ENV PATH=(\S+)', '\1') | first | replace('${NODE_VERSION}', node_version) }}
         # Each mount's host path, and how it is mounted, in order.
         render_mounts:
-          - [rw, "{{ nucleus_root }}"]
-          - [ro, "{{ nucleus_root }}/.claude"]
-          - [ro, "{{ nucleus_root }}/.seeds"]
-          - [ro, "{{ nucleus_root }}/.mcp.json"]
-          - [ro, "{{ nucleus_root }}/AGENTS.md"]
-          - [ro, "{{ nucleus_root }}/CLAUDE.md"]
+          - [rw, "{{ render_nucleus }}"]
+          - [ro, "{{ render_nucleus }}/.claude"]
+          - [ro, "{{ render_nucleus }}/.seeds"]
+          - [ro, "{{ render_nucleus }}/.mcp.json"]
+          - [ro, "{{ render_nucleus }}/AGENTS.md"]
+          - [ro, "{{ render_nucleus }}/CLAUDE.md"]
           - [rw, "{{ env.config_dir | default('') }}"]
           - [ro, "{{ agent_home }}/.local/share/claude"]
           - [ro, "{{ agent_home }}/.local/bin"]
-          - [ro, "{{ agent_home }}/.config/nucleate"]
           - [ro, "{{ agent_home }}/.config/nucleated-hook"]
           - [rw, "{{ agent_home }}/.local/state/nucleated/spool"]
           - [ro, /run/agent-tokens]
@@ -521,6 +540,65 @@
         render_checked: >-
           {{ lookup('ansible.builtin.file', playbook_dir ~ '/../roles/agent_servers/files/agent-env-start')
           | regex_search('(?m)^for want in ([^;]+);', '\1') | first | split(' ') | map('regex_replace', '^[df]:', '') | list }}
+
+    # nucleate in the container works in the environment's own nucleus, and
+    # offers the box's repositories, as the host's nucleus does.
+    - name: Read each container environment's nucleate configuration back as TOML
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - import json, sys, tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))))
+          - "{{ render_dir }}/{{ env.name }}.nucleate.toml"
+      loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.nucleate.toml"
+      register: render_nucleate
+      changed_when: false
+
+    - name: Check each against the environment's nucleus and the box's repositories
+      ansible.builtin.assert:
+        that:
+          - (item.stdout | from_json).keys() | sort == ['github_token_file', 'root']
+          - (item.stdout | from_json).root == agent_home ~ '/workspace-' ~ item.env.name
+          - (item.stdout | from_json).github_token_file == '/run/agent-tokens/github'
+          - render_repos == repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | map('regex_replace', '^(.*)$', 'https://github.com/\\1.git') | list
+        quiet: true
+      vars:
+        render_repos: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ item.env.name ~ '.repos').split('\n') | select | list }}"
+      loop: "{{ render_nucleate.results }}"
+      loop_control:
+        label: "{{ item.env.name }}"
+
+    # The host's nucleus registers the worktree hooks from the agent user's
+    # home, as it always has; a container's nucleus by their full path.
+    - name: Render the nucleus's worktree hooks, for the host and for a container
+      ansible.builtin.template:
+        src: ../roles/workspace/templates/nucleus-settings.json.j2
+        dest: "{{ render_dir }}/nucleus-settings.{{ item.name }}.json"
+        mode: "0600"
+      vars:
+        workspace_nucleate: "{{ item.nucleate }}"
+      loop:
+        - name: host
+          nucleate: $HOME/.local/bin/nucleate
+        - name: container
+          nucleate: "{{ agent_home }}/.local/bin/nucleate"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Check them
+      ansible.builtin.assert:
+        that:
+          - render_host.hooks.WorktreeCreate[0].hooks[0].command == '$HOME/.local/bin/nucleate hook-create'
+          - render_host.hooks.WorktreeRemove[0].hooks[0].command == '$HOME/.local/bin/nucleate hook-remove'
+          - render_container.hooks.WorktreeCreate[0].hooks[0].command == agent_home ~ '/.local/bin/nucleate hook-create'
+          - render_host.hooks.keys() | sort == ['WorktreeCreate', 'WorktreeRemove']
+        quiet: true
+      vars:
+        render_host: "{{ lookup('ansible.builtin.file', render_dir ~ '/nucleus-settings.host.json') | from_json }}"
+        render_container: "{{ lookup('ansible.builtin.file', render_dir ~ '/nucleus-settings.container.json') | from_json }}"
 
     - name: Check each server folder registers nucleate's worktree hooks where they are in the container
       ansible.builtin.assert:

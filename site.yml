@@ -32,6 +32,9 @@
     env_setup_script: "{{ env.setup_script | default('', true) }}"
     # The unit that runs its agent server: on the host, or in its container.
     env_unit: "{{ 'agent-env-' ~ env.name ~ '.service' if env_runtime == 'container' else 'agent-server@' ~ env.name ~ '.service' }}"
+    # Its nucleus: the shared one on the host; in a container, its own, which
+    # is all its container mounts of the agent user's workspace.
+    env_nucleus: "{{ agent_home ~ '/workspace-' ~ env.name if env_runtime == 'container' else nucleus_root }}"
     # Nucarium Watch is hosted only, so its address is not a setting.
     watch_console_url: https://app.nucarium.com
     # What box_notify_url may be: https, or http to the box itself, with no
