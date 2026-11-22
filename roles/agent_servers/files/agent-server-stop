@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Stops one agent server and returns only once it has gone. The unit
+# agent-server@<name>.service runs this as its ExecStop.
+#
+# tmux starts each pane in a scope of its own (tmux-spawn-<id>.scope), outside
+# the unit, so systemd neither waits for the server nor stops it. Without the
+# wait, a restart starts the new server while the old one is still shutting
+# down, and the new one exits at once.
+set -euo pipefail
+
+socket="agent-${1:?usage: agent-server-stop <name>}"
+
+# The server exits by itself, by design, so there may be nothing to stop.
+panes=$(tmux -L "$socket" list-panes -a -F '#{pane_pid}' 2>/dev/null) || exit 0
+
+# The scope each pane runs in. Only tmux's own scopes: a pane inside this unit
+# is stopped with it, and stopping the unit from here would wait for itself.
+scopes=()
+for pid in $panes; do
+  unit=$(ps -o uunit= -p "$pid" 2>/dev/null | tr -d ' ') || continue
+  case "$unit" in
+    tmux-spawn-*.scope) scopes+=("$unit") ;;
+  esac
+done
+
+# Hang up on the server, as closing its terminal would.
+tmux -L "$socket" kill-server 2>/dev/null || true
+
+# Stopping a scope waits until everything in it has exited, the server's
+# sessions included, and ends anything left after TimeoutStopSec.
+if [ "${#scopes[@]}" -gt 0 ]; then
+  systemctl --user stop "${scopes[@]}" 2>/dev/null || true
+fi

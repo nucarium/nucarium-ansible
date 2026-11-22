@@ -330,7 +330,9 @@ Choices this recipe makes where the product leaves room:
   Remote Control server is a terminal program: it asks its first-start
   questions in a terminal and shows its state there. The unit stops when the
   server exits and systemd starts it again, so the unit is active exactly
-  while the server runs. `nucleated` reads the unit's state; it never starts
+  while the server runs. Stopping the unit waits until the server and its
+  sessions have exited, so a restart never starts a second server beside one
+  that is still shutting down. `nucleated` reads the unit's state; it never starts
   or stops a server.
 - **Hooks name their environment.** Each login's `settings.json` registers
   `nucleated hook <event> --env <name>`, so a session is always counted under

@@ -18,11 +18,14 @@
         - .config/systemd/user
         - .config/agent-servers
 
-    - name: Install the start script
+    - name: Install the start and stop scripts
       ansible.builtin.copy:
-        src: agent-server
-        dest: "{{ agent_home }}/.local/bin/agent-server"
+        src: "{{ item }}"
+        dest: "{{ agent_home }}/.local/bin/{{ item }}"
         mode: "0755"
+      loop:
+        - agent-server
+        - agent-server-stop
 
     - name: Cap the memory of all agent servers together
       ansible.builtin.template:
