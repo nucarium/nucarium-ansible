@@ -9,6 +9,7 @@
   args:
     executable: /bin/bash
   register: tpm_luks
+  check_mode: false
   changed_when: false
   failed_when: tpm_luks.stdout == ""
 
@@ -29,6 +30,7 @@
 - name: List existing bindings
   ansible.builtin.command: clevis luks list -d /dev/{{ tpm_luks.stdout }}
   register: tpm_bindings
+  check_mode: false
   changed_when: false
 
 - name: Bind the disk key to the TPM
@@ -88,6 +90,7 @@
     - name: Check whether a password is already set
       ansible.builtin.command: grep -c password_pbkdf2 /etc/grub.d/40_custom
       register: tpm_grub_set
+      check_mode: false
       changed_when: false
       failed_when: false
 
@@ -100,6 +103,7 @@
         stdin: "{{ secrets.grub_password }}\n{{ secrets.grub_password }}"
       no_log: true
       register: tpm_grub_hash
+      check_mode: false
       changed_when: false
       when: tpm_grub_set.stdout == "0"
 

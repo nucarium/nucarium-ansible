@@ -10,6 +10,7 @@
 - name: Check Tailscale state
   ansible.builtin.command: tailscale status --json
   register: network_ts
+  check_mode: false
   changed_when: false
   failed_when: false
 

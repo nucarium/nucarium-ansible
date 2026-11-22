@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Fail when a dry run (--check) would read a command's result it never got.
+
+In check mode Ansible skips every command and shell task. The registered
+result then has rc 0 and empty output, so a later task that reads it
+(`x.rc`, `x.stdout | from_json`, `loop: "{{ x.results }}"`) sees a made-up
+answer or fails outright. Every registered command or shell result that a
+later task, block or template reads needs one of:
+
+  - check_mode: false on the command, for a probe that changes nothing, so
+    it runs in a dry run too;
+  - ansible_check_mode in the task that reads it, e.g.
+    `when: not ansible_check_mode`, for a command that changes something;
+  - a `| default(...)` right after the value that is read.
+
+Reading only the task's status (`x is changed`, `x is skipped`) is safe:
+check mode sets it truthfully.
+"""
+import pathlib
+import re
+import sys
+
+import yaml
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+COMMAND_MODULES = {
+    prefix + name
+    for prefix in ("", "ansible.builtin.", "ansible.legacy.")
+    for name in ("command", "shell", "raw", "script")
+}
+BLOCK_KEYS = ("block", "rescue", "always")
+STATUS_TEST = re.compile(
+    r"\s+is\s+(not\s+)?(changed|change|skipped|skip|failed|failure|succeeded|success)\b"
+)
+DEFAULTED = re.compile(r"((\.\w+)|(\[[^\]]*\]))*\s*\|\s*(default|d)\b")
+
+
+def task_files():
+    yield from (ROOT / "tasks").glob("*.yml")
+    yield from ROOT.glob("roles/*/tasks/*.yml")
+    yield from ROOT.glob("roles/*/handlers/*.yml")
+
+
+def playbook_tasks(path):
+    """The task lists in a file: a playbook's plays, or a plain task list."""
+    data = yaml.safe_load(path.read_text()) or []
+    if data and all(isinstance(p, dict) and "hosts" in p for p in data):
+        for play in data:
+            for key in ("pre_tasks", "tasks", "post_tasks", "handlers"):
+                yield play.get(key) or []
+    else:
+        yield data
+
+
+def walk(tasks, where, check_mode=None, guard=""):
+    """Yield (kind, task, where, check_mode, guard) for tasks and block headers."""
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        here = f"{where}: {task.get('name', '(unnamed)')}"
+        mode = task.get("check_mode", check_mode)
+        if any(key in task for key in BLOCK_KEYS):
+            header = {k: v for k, v in task.items() if k not in BLOCK_KEYS}
+            yield "block", header, here, mode, guard
+            inner_guard = guard + yaml.safe_dump(header)
+            for key in BLOCK_KEYS:
+                yield from walk(task.get(key) or [], where, mode, inner_guard)
+        else:
+            yield "task", task, here, mode, guard
+
+
+def main():
+    entries = []
+    for path in [ROOT / "site.yml", ROOT / "autoinstall.yml", *task_files()]:
+        if not path.exists():
+            continue
+        rel = path.relative_to(ROOT)
+        for tasks in playbook_tasks(path):
+            entries.extend(walk(tasks, str(rel)))
+
+    producers = []
+    for index, (kind, task, here, mode, _) in enumerate(entries):
+        if kind == "task" and "register" in task and COMMAND_MODULES & task.keys():
+            if mode is not False:
+                producers.append((index, task["register"], here))
+
+    readers = [
+        (index, here, yaml.safe_dump(task), guard)
+        for index, (_, task, here, _, guard) in enumerate(entries)
+    ]
+    for path in [*ROOT.glob("templates/*.j2"), *ROOT.glob("roles/*/templates/*.j2")]:
+        readers.append((None, str(path.relative_to(ROOT)), path.read_text(), ""))
+
+    problems = []
+    for producer_index, name, made_in in producers:
+        pattern = re.compile(rf"\b{re.escape(name)}\b")
+        for reader_index, here, text, guard in readers:
+            if reader_index == producer_index:
+                continue  # a task's own changed_when and failed_when are not evaluated in check mode
+            if "ansible_check_mode" in text or "ansible_check_mode" in guard:
+                continue
+            for match in pattern.finditer(text):
+                rest = text[match.end():]
+                if STATUS_TEST.match(rest) or DEFAULTED.match(rest):
+                    continue
+                problems.append(f"{here} reads {name}, registered by {made_in}")
+                break
+
+    if problems:
+        print("Check mode skips these commands, so a dry run reads results they never produced:")
+        for problem in problems:
+            print(f"  {problem}")
+        print(
+            "Give a command that changes nothing `check_mode: false`; guard a reader of one"
+            " that does with `ansible_check_mode` or `| default(...)`."
+        )
+        return 1
+    print(f"{len(producers)} registered commands skipped in check mode; none read unguarded")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

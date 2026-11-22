@@ -27,6 +27,9 @@ ansible-lint
 echo "== yamllint"
 yamllint .
 
+echo "== dry runs read only what check mode really ran"
+scripts/check-mode-probes
+
 echo "== shellcheck"
 # shellcheck disable=SC2086  # the list is split into file names on purpose
 shellcheck $shell_files

@@ -66,6 +66,7 @@
         loop_var: env
         label: "{{ env.name }}"
       register: workspace_mcp
+      check_mode: false
       changed_when: false
       failed_when: false
 
