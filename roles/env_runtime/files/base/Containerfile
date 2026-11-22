@@ -91,8 +91,9 @@ RUN set -eux; \
       rm "/tmp/$dir.tar.xz" /tmp/SHASUMS256.txt; \
     done; \
     rm /tmp/node-index.json; \
-    "/opt/node$NODE_VERSION/bin/corepack" enable pnpm; \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 PATH="/opt/node$NODE_VERSION/bin:$PATH" pnpm --version
+    export PATH="/opt/node$NODE_VERSION/bin:$PATH" COREPACK_ENABLE_DOWNLOAD_PROMPT=0; \
+    corepack enable pnpm; \
+    pnpm --version
 
 # node_version's Node first, then the places tools install into for root:
 # ~/.local/bin (pipx, uv tool), ~/.cargo/bin, Go and ~/go/bin.
