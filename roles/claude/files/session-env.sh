@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SessionStart hook. Adds to every new session of environment $1 the
+# variables a session on this box needs, then the environment's own
+# (variables in environments, group_vars/all.yml), which the env_setup role
+# writes, shell-quoted and root-owned, to
+# /etc/nucarium/environments/<name>/variables.sh.
 if [ -n "$CLAUDE_ENV_FILE" ]; then
   cat >> "$CLAUDE_ENV_FILE" <<'ENVEOF'
 export GH_TOKEN="$(cat /run/agent-tokens/github 2>/dev/null)"
@@ -10,5 +15,15 @@ export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
 # Appended, and read-only to sandboxed commands (vars/sandbox.yml).
 export PATH="$PATH:$HOME/go/bin:$HOME/.cargo/bin"
 ENVEOF
+  # An environment's name is lower-case letters, digits and hyphens.
+  case "${1:-}" in
+    '' | *[!a-z0-9-]*) ;;
+    *)
+      variables="/etc/nucarium/environments/$1/variables.sh"
+      if [ -r "$variables" ]; then
+        cat "$variables" >> "$CLAUDE_ENV_FILE"
+      fi
+      ;;
+  esac
 fi
 exit 0

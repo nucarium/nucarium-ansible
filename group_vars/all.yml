@@ -92,6 +92,56 @@ github_app_installation_id: "12345678"
 #               needs its own, for example /home/agent/.claude-second.
 #   capacity    The most sessions this environment runs at once. Left out,
 #               it is 12, which suits 64 GB.
+#
+# Each environment can also have what a Claude Code cloud environment has,
+# set here on the box and shown, read-only, in Watch:
+#
+#   network        What commands in its sessions may reach: none, limited
+#                  or full (any host). Left out, it is limited: the hosts a
+#                  cloud session reaches by default (package registries,
+#                  GitHub, cloud SDKs) plus sandbox_extra_allowed_domains.
+#                  It governs the commands agents run in the sandbox. Claude
+#                  Code's own WebFetch tool is not one of them: even with
+#                  none, it can still fetch a page once a permission prompt
+#                  is approved.
+#   allowed_hosts  More hosts for limited, one per line, on top of that
+#                  list. A leading *. matches every subdomain.
+#   variables      NAME: value lines, set in every new session of the
+#                  environment. Not secret: anything in this file can be read
+#                  by the agents. Quote every value ("3.10", "0755", "true"):
+#                  unquoted, YAML changes them, so the playbook refuses them.
+#   setup_script   A bash script, run as root in /root before the agent
+#                  server starts: at every boot, and once more
+#                  whenever you change it. Running it again never restarts an
+#                  agent server or interrupts a session, and a script that
+#                  fails still lets the server start. Up to 30 minutes; its
+#                  output is in the box's journal (journalctl -u
+#                  nucarium-env-setup@<name>), and Watch says when it fails.
+#                  It must be safe to run more than once. The nucleus's
+#                  path is in $NUCLEUS_ROOT; the agent can write there, so do
+#                  anything inside it as the agent (runuser -u agent -- ...).
+#
+# Ansible reads {{, {% and {# in a value as a template, and a script often
+# has them: ${#list[@]}, or docker ps --format '{{.Names}}'. Write !unsafe
+# after the key, setup_script: !unsafe |, to have it taken as written, and
+# the same before a variable's value that has them, NAME: !unsafe '{{.Names}}'.
+# Without it the playbook stops and names the environment and the key.
+#
+# Changing any of these needs `--tags claude,env_setup`; new sessions see
+# the change. For example:
+#
+#   - name: main
+#     network: limited
+#     allowed_hosts:
+#       - api.example.com
+#       - "*.internal.example.com"
+#     variables:
+#       NODE_ENV: development
+#       FEATURE_FLAGS: "beta,dark-mode"
+#     setup_script: !unsafe |
+#       packages=(libvips-dev jq)
+#       echo "Installing ${#packages[@]} packages"
+#       apt-get install -y --no-install-recommends "${packages[@]}"
 environments:
   - name: main
     capacity: 12

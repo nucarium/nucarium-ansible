@@ -1,0 +1,66 @@
+---
+# A third shape to render: one environment for each network, an
+# environment's own hosts, variables whose values a careless quoting would
+# break, and a setup script. The script and one value hold text Ansible
+# would read as a template, so they are marked !unsafe, as the comment in
+# group_vars/all.yml says.
+environments:
+  - name: main
+    network: limited
+    allowed_hosts:
+      - api.example.com
+      - "*.internal.example.com"
+      - registry.npmjs.org
+    variables:
+      PLAIN: hello
+      WITH_SPACES: "two words  and   more"
+      WITH_QUOTES: it's "quoted"
+      WITH_DOLLAR: $HOME, $(id -u), `id -u` and ${PATH}
+      WITH_NEWLINES: "line one\nline two\n"
+      WITH_BACKSLASH: 'C:\path\to\it'
+      EMPTY: ""
+      VERSION: "3.10"
+      MODE: "0755"
+      GO_FORMAT: !unsafe "{{.Names}}, {% raw %} and {# not a comment"
+  - name: open
+    config_dir: /home/agent/.claude-open
+    network: full
+    setup_script: !unsafe |
+      set -euo pipefail
+      apt-get install -y --no-install-recommends libvips-dev
+      packages=(libvips-dev jq)
+      echo "${#packages[@]} packages"
+      docker ps --format '{{.Names}}' {% if %}
+  - name: closed
+    config_dir: /home/agent/.claude-closed
+    network: none
+    variables:
+      NODE_ENV: test
+
+# The script each environment stores, character for character.
+render_expected_setup_scripts:
+  open: !unsafe "set -euo pipefail\napt-get install -y --no-install-recommends libvips-dev\npackages=(libvips-dev jq)\necho \"${#packages[@]} packages\"\ndocker ps --format '{{.Names}}' {% if %}\n"
+
+# What each environment's summary must say, word for word.
+render_expected_summaries:
+  main:
+    network: limited
+    allowed_hosts: 3
+    repos: [your-org/web, your-org/api]
+    variables: 10
+    secrets: 0
+    setup_script: false
+  open:
+    network: full
+    allowed_hosts: 0
+    repos: [your-org/web, your-org/api]
+    variables: 0
+    secrets: 0
+    setup_script: true
+  closed:
+    network: none
+    allowed_hosts: 0
+    repos: [your-org/web, your-org/api]
+    variables: 1
+    secrets: 0
+    setup_script: false

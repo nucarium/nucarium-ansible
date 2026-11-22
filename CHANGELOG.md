@@ -4,6 +4,58 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## Environments set up like a cloud environment
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+Each environment can now have what a Claude Code cloud environment has: its
+own network access, more hosts, environment variables and a setup script.
+They are set on the box, and `nucleated` reports a summary to Nucarium Watch,
+which shows it and says when a setup script fails.
+
+### Settings added
+
+Four optional keys in each entry of `environments`:
+
+| Setting | Default | What it is |
+|---|---|---|
+| `network` | `limited` | What commands in the environment's sessions may reach: `none`, `limited` (the hosts a cloud session reaches by default, plus `sandbox_extra_allowed_domains`) or `full` (any host). |
+| `allowed_hosts` | `[]` | More hosts for `limited`, on top of that list. |
+| `variables` | `{}` | `NAME: value` lines set in every new session of the environment. Not secret. |
+| `setup_script` | none | A bash script run as root in `/root` (the nucleus's path is in `NUCLEUS_ROOT`) before the agent server starts: at every boot, and again whenever it changes. |
+
+No setting is renamed or removed. A settings file from before these existed
+works as it is, and each environment keeps the network it had. A key the
+recipe does not know in an entry of `environments` now stops the playbook,
+where before it was ignored.
+
+Every value in `variables` must be quoted text, and the playbook refuses one
+that is not: unquoted, YAML turns `3.10` into `3.1` and `0755` into `493`. A
+script or a value with `{{`, `{%` or `{#` in it, such as `${#list[@]}` or
+`docker ps --format '{{.Names}}'`, needs `!unsafe` after its key
+(`setup_script: !unsafe |`), or Ansible reads it as a template; the playbook
+then stops and names the environment and the key.
+
+`network` governs the commands agents run in the sandbox. Claude Code's own
+WebFetch tool is not one of them: even with `none`, it can fetch a page once
+a permission prompt is approved.
+
+### Roles and tags
+
+| Role | What changed |
+|---|---|
+| `claude` | Each login's sandbox network follows its environment's `network` and `allowed_hosts`. The session hook also adds the environment's variables. |
+| `env_setup` | New, tag `env_setup`. Writes each environment's variables and setup script under `/etc/nucarium/environments/<name>/`, installs `nucarium-env-setup@.service`, which runs the script at boot and when it changes, and writes `/var/lib/nucarium/environments/<name>.json`, the summary `nucleated` reports. |
+| `agent_servers` | An agent server waits while its environment's setup script runs, and starts whether it succeeded or not. |
+
+### A box built with an earlier copy of the recipe
+
+Run `ansible-playbook site.yml --tags claude,env_setup,agent_servers`.
+Nothing is restarted. New sessions get the new settings, and each agent
+server waits for its setup script from its next restart on. Watch shows the
+summary once `nucleated` is a release that reports it.
+
 ## The UPS state and the box's own notifier
 
 This entry has no version number of its own: the release that carries it is

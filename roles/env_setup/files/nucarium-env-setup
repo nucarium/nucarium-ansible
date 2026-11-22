@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Runs one environment's setup script and records how it went, for nucleated
+# to report to Nucarium Watch. nucarium-env-setup@<name>.service runs this at
+# boot and whenever the recipe changes the script:
+#
+#   systemctl restart nucarium-env-setup@main.service   # run it again
+#   journalctl -u nucarium-env-setup@main.service       # what it printed
+#
+# The script, /etc/nucarium/environments/<name>/setup.sh, runs with bash, as
+# root, with HOME=/root, in /root, for at most 30 minutes. Its output
+# goes to the journal only. The last run is recorded, atomically, in
+# /var/lib/nucarium/environments/<name>.setup.json: running from start to
+# finish, then ok on exit 0 or failed on any other exit, with 124 for the time
+# limit and 128+n for signal n. A run stopped by a signal is failed even if
+# the script caught it and exited 0.
+#
+# It starts in /root, not in the nucleus: the agent can write the nucleus, and
+# git, npm, pip and their kind read config from the folder they start in, so a
+# root script started there runs whatever the agent left for it. The script
+# gets the nucleus's path in NUCLEUS_ROOT. Anything it runs inside the nucleus
+# as root, the agent can steer; run that part as the agent user instead
+# (runuser -u agent -- ...).
+set -euo pipefail
+
+name="${1:?usage: nucarium-env-setup <name>}"
+case "$name" in
+  -* | *[!a-z0-9-]*)
+    echo "nucarium-env-setup: not an environment name: $name" >&2
+    exit 2
+    ;;
+esac
+: "${NUCLEUS_ROOT:?set by the service}"
+
+script="/etc/nucarium/environments/$name/setup.sh"
+limit_s=1800
+state_dir=/var/lib/nucarium/environments
+status="$state_dir/$name.setup.json"
+
+if [ ! -f "$script" ]; then
+  echo "Environment $name has no setup script."
+  exit 0
+fi
+
+now_ms() { date +%s%3N; }
+
+# A temporary file in the same folder, renamed over the old one, so a reader
+# sees the last run or this one and never half of either. A stale "running"
+# from a run the box lost power in is simply replaced.
+write_status() {
+  local tmp
+  tmp=$(mktemp "$state_dir/.$name.setup.json.XXXXXX")
+  printf '%s\n' "$1" > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$status"
+}
+
+sha=$(sha256sum "$script" | cut -d ' ' -f 1)
+started=$(now_ms)
+write_status "{\"state\":\"running\",\"started_at_ms\":$started,\"script_sha256\":\"$sha\"}"
+echo "Running the setup script of environment $name (sha256 $sha)."
+
+rc=0
+if cd /root; then
+  # In the background so that a stop (systemctl stop, or the box shutting
+  # down) is passed on to the script and still recorded, as 128+n.
+  HOME=/root NUCLEUS_ROOT="$NUCLEUS_ROOT" timeout --kill-after=60 "$limit_s" bash "$script" < /dev/null &
+  child=$!
+  # The first signal is kept: a run that was stopped is failed, 128+n, even
+  # if the script caught the signal and exited 0. "again" only tells the loop
+  # that wait returned for a signal, not because the script ended.
+  signal=
+  again=
+  # shellcheck disable=SC2329  # called by the traps below
+  on_signal() {
+    signal="${signal:-$1}"
+    again=1
+    kill -TERM "$child" 2> /dev/null || true
+  }
+  trap 'on_signal 1' HUP
+  trap 'on_signal 2' INT
+  trap 'on_signal 15' TERM
+  while :; do
+    again=
+    rc=0
+    wait "$child" || rc=$?
+    [ -z "$again" ] && break
+  done
+  trap - TERM INT HUP
+  if [ -n "$signal" ]; then
+    rc=$((128 + signal))
+  fi
+else
+  rc=1
+fi
+
+finished=$(now_ms)
+# timeout exits 124 when the script stops at its signal, but 137 when the
+# script ignored it and had to be killed. Both are the time limit.
+if [ "$rc" -eq 137 ] && [ $((finished - started)) -ge $((limit_s * 1000)) ]; then
+  rc=124
+fi
+if [ "$rc" -eq 0 ]; then state=ok; else state=failed; fi
+write_status "{\"state\":\"$state\",\"started_at_ms\":$started,\"finished_at_ms\":$finished,\"exit_code\":$rc,\"script_sha256\":\"$sha\"}"
+case "$rc" in
+  0) echo "The setup script of environment $name finished." ;;
+  124) echo "The setup script of environment $name ran for $((limit_s / 60)) minutes and was stopped." ;;
+  *) echo "The setup script of environment $name failed with exit code $rc." ;;
+esac
+exit "$rc"

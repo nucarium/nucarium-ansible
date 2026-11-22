@@ -1,0 +1,20 @@
+# Written by the Nucarium box recipe (the env_setup role).
+[Unit]
+Description=Setup script of environment %i
+Documentation=https://nucarium.dev
+Wants=network-online.target
+After=network-online.target
+# Run before agent-server@%i.service. That is a user unit of the agent user,
+# which systemd cannot order after a system unit, so the agent server's start
+# script waits for this one instead, and starts whether it succeeded or not.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=NUCLEUS_ROOT={{ nucleus_root }}
+ExecStart=/usr/local/sbin/nucarium-env-setup %i
+# The script's own limit is 30 minutes; this only backs it up.
+TimeoutStartSec=35min
+
+[Install]
+WantedBy=multi-user.target

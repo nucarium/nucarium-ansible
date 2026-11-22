@@ -10,9 +10,7 @@
       "allowWrite": {{ claude_sandbox_allow_write | to_json }},
       "denyWrite": {{ (claude_sandbox_deny_in_allowed + claude_sandbox_deny_write) | to_json }}
     },
-    "network": {
-      "allowedDomains": {{ (claude_cloud_allowed_domains + (sandbox_extra_allowed_domains | default([]))) | unique | to_json }}
-    }
+    "network": {{ claude_sandbox_network | to_json }}
   },
   "permissions": {
     "deny": [
@@ -25,7 +23,7 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/session-env.sh", "timeout": 10 },
+          { "type": "command", "command": "$HOME/.claude/hooks/session-env.sh {{ env.name }}", "timeout": 10 },
           { "type": "command", "command": "{{ claude_nucleated_hook }} SessionStart --env {{ env.name }}", "async": true, "timeout": 5 }
         ]
       }

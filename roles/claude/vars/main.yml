@@ -271,3 +271,26 @@ claude_cloud_allowed_domains:
   - go.dev
   - app.terraform.io
   - registry.terraform.io
+
+# What one environment's sandboxed commands may reach, from its network in
+# environments (group_vars/all.yml):
+#
+#   limited  The list above, sandbox_extra_allowed_domains and the
+#            environment's own allowed_hosts.
+#   full     Every host: a bare "*". Claude Code's sandboxing page documents
+#            the bare * for WebFetch(domain:...) rules, which feed this same
+#            list. Written here it allows every host to sandboxed commands
+#            (checked with Claude Code 2.1.330) and widens nothing else; the
+#            WebFetch rule would also let the WebFetch tool fetch anything
+#            without asking.
+#   none     No host: an empty list, and strictAllowlist, so a host outside it
+#            is refused in every permission mode rather than offered to you
+#            for approval, and a repository's own allowedDomains are ignored.
+#            Honoured from these user settings files (Claude Code v2.1.219).
+#
+# There is no setting that turns network filtering off while the filesystem
+# sandbox stays on, so full is the * entry, not the filter switched off.
+claude_sandbox_network: >-
+  {{ {'allowedDomains': ['*']} if env_network == 'full'
+  else {'allowedDomains': [], 'strictAllowlist': true} if env_network == 'none'
+  else {'allowedDomains': (claude_cloud_allowed_domains + (sandbox_extra_allowed_domains | default([])) + env_allowed_hosts) | unique} }}

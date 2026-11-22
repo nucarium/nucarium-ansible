@@ -1,0 +1,66 @@
+---
+# Checks each entry of environments in group_vars/all.yml before anything on
+# the box changes: only the keys the recipe knows, and for each the kind of
+# value it takes. Imported by site.yml and by tests/render.yml, which
+# scripts/check also runs with entries that must be refused.
+# Ansible reads {{, {% and {# in a value as a template, so a script or a
+# value with ${#arr[@]} or --format '{{.Names}}' in it would stop every run
+# with an error about template syntax. Each is tried on its own first, so the
+# message can say which one to mark !unsafe.
+- name: Try each environment's script, variables and hosts as Ansible reads them
+  ansible.builtin.assert:
+    that: environments[item.0][item.1] | default('') | to_json | length > 0
+    quiet: true
+  loop: "{{ range(environments | length) | product(['setup_script', 'variables', 'allowed_hosts', 'network']) | list }}"
+  loop_control:
+    label: "{{ environments[item.0].name | default(item.0 + 1) }}: {{ item.1 }}"
+  register: env_templated
+  ignore_errors: true
+
+- name: Stop if Ansible would read one as a template
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml:
+      {% for r in env_templated.results | select('failed') %}environment {{ environments[r.item.0].name | default(r.item.0 + 1) }}: {{ r.item.1 }}{{ '' if loop.last else ', and ' }}{% endfor %}
+      {{ 'has' if env_templated.results | select('failed') | list | length == 1 else 'have' }}
+      {{ '{{' }}, {{ '{%' }} or {{ '{#' }} in it, which Ansible reads as a template (see the error above).
+      Write !unsafe after the key, as in setup_script: !unsafe |, or before
+      the one variable's value, as in NAME: !unsafe '{{ '{{' }}.Names}}'.
+  when: env_templated.results | select('failed') | list | length > 0
+
+- name: Check each environment's network, variables and setup script
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml: environment {{ env.name | default(ansible_loop.index) }}:
+      {{ 'is not a set of keys such as name: and capacity:' if env is not mapping else env_problems | join('; ') }}.
+  when: env is not mapping or env_problems | length > 0
+  vars:
+    env_known_keys: [name, config_dir, capacity, network, allowed_hosts, variables, setup_script]
+    # A shell variable name, as bash takes it after `export`.
+    env_variable_name: '^[A-Za-z_][A-Za-z0-9_]*$'
+    # A host, a *.wildcard or an address, with an optional :port. Nothing that
+    # is not part of a host name.
+    env_host: '^[^\s"''\\,;/]+$'
+    # * on its own, on any port: every host.
+    env_any_host: '^\*(:[0-9]*)?$'
+    env_unknown_keys: "{{ env.keys() | difference(env_known_keys) | list }}"
+    env_problems: >-
+      {{
+        (['it has keys the recipe does not know: ' ~ (env_unknown_keys | join(', ')) ~ ' (it knows ' ~ (env_known_keys | join(', ')) ~ ')'] if env_unknown_keys else [])
+      + ([('network is "' ~ env_network ~ '", and must be none, limited or full')] if env_network not in ['none', 'limited', 'full'] else [])
+      + (['allowed_hosts is a list of hosts, one per line'] if env_allowed_hosts is string or env_allowed_hosts is mapping or env_allowed_hosts is not sequence
+         else (['allowed_hosts holds more than 10000 hosts'] if env_allowed_hosts | length > 10000 else [])
+            + (['allowed_hosts adds hosts to limited only, and network is ' ~ env_network] if env_allowed_hosts | length > 0 and env_network != 'limited' else [])
+            + (['allowed_hosts allows every host with ' ~ (env_allowed_hosts | select('string') | select('match', env_any_host) | join(', ')) ~ ': to allow every host, set network: full'] if env_allowed_hosts | select('string') | select('match', env_any_host) | list else [])
+            + (['allowed_hosts has entries that are not a host, *.domain or address: ' ~ ((env_allowed_hosts | reject('string') | map('string') | list) + (env_allowed_hosts | select('string') | reject('match', env_host) | list)) | join(', ')] if env_allowed_hosts | reject('string') | list or env_allowed_hosts | reject('match', env_host) | list else []))
+      + (['variables is a set of NAME: value lines, and is ' ~ (env_variables | type_debug)] if env_variables is not mapping
+         else (['variables holds more than 1000 variables'] if env_variables | length > 1000 else [])
+            + (['variables has names that are not shell variable names (letters, digits and _, not starting with a digit): ' ~ (env_variables.keys() | map('string') | reject('match', env_variable_name) | join(', '))] if env_variables.keys() | map('string') | reject('match', env_variable_name) | list else [])
+            + (['variables has values that are not quoted text: ' ~ (env_variables | dict2items | rejectattr('value', 'string') | map(attribute='key') | sort | join(', ')) ~ ' (quote every value, as in NAME: "3.10": unquoted, YAML turns 3.10 into 3.1, 0755 into 493 and yes into true)'] if env_variables | dict2items | rejectattr('value', 'string') | list else []))
+      + (['setup_script is the script itself, as text (write setup_script: | and the script below it)'] if env_setup_script is not string else [])
+      }}
+  loop: "{{ environments }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name | default(env) }}"
+    extended: true
