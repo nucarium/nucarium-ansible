@@ -178,6 +178,17 @@
     mode: "0755"
   loop: "{{ sandbox_agent_dirs + ['go/bin'] }}"
 
+# The sandbox can only hold a folder read-only if it is there when a session
+# starts; a missing one could be made, and written, by a sandboxed command.
+# nucleated keeps it private, so it is 0700.
+- name: Create nucleated's state folder before any session starts
+  ansible.builtin.file:
+    path: "{{ agent_home }}/.local/state/nucleated"
+    state: directory
+    owner: "{{ agent_user }}"
+    group: "{{ agent_user }}"
+    mode: "0700"
+
 # pnpm keeps its locks in the user's runtime folder, which is new at every
 # boot. These folders are made at login so the sandbox can let agents write
 # them.
