@@ -20,9 +20,11 @@
     # and needs no variable.
     env_config_dir: "{{ env.config_dir | default(agent_home ~ '/.claude') }}"
     env_claude: "{{ {} if env_config_dir == agent_home ~ '/.claude' else {'CLAUDE_CONFIG_DIR': env_config_dir} }}"
-    # The rest of one environment's settings, with their defaults: what its
-    # sandboxed commands may reach, the hosts limited adds, its variables and
-    # its setup script. tasks/check-environments.yml checks them first.
+    # The rest of one environment's settings, with their defaults: where it
+    # runs (host or container), what its sandboxed commands may reach, the
+    # hosts limited adds, its variables and its setup script.
+    # tasks/check-environments.yml checks them first.
+    env_runtime: "{{ env.runtime | default('host', true) }}"
     env_network: "{{ env.network | default('limited', true) }}"
     env_allowed_hosts: "{{ env.allowed_hosts | default([], true) }}"
     env_variables: "{{ env.variables | default({}, true) }}"
@@ -125,6 +127,9 @@
     - role: env_setup
       become: true
       tags: env_setup
+    - role: env_runtime
+      become: true
+      tags: env_runtime
     - role: agent_servers
       become: true
       tags: agent_servers

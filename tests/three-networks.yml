@@ -1,9 +1,9 @@
 ---
-# A third shape to render: one environment for each network, an
-# environment's own hosts, variables whose values a careless quoting would
-# break, and a setup script. The script and one value hold text Ansible
-# would read as a template, so they are marked !unsafe, as the comment in
-# group_vars/all.yml says.
+# A third shape to render: one environment for each network, one in a
+# container and one on the host by name, an environment's own hosts,
+# variables whose values a careless quoting would break, and a setup script.
+# The script and one value hold text Ansible would read as a template, so
+# they are marked !unsafe, as the comment in group_vars/all.yml says.
 environments:
   - name: main
     network: limited
@@ -24,6 +24,7 @@ environments:
       GO_FORMAT: !unsafe "{{.Names}}, {% raw %} and {# not a comment"
   - name: open
     config_dir: /home/agent/.claude-open
+    runtime: host
     network: full
     setup_script: !unsafe |
       set -euo pipefail
@@ -33,9 +34,13 @@ environments:
       docker ps --format '{{.Names}}' {% if %}
   - name: closed
     config_dir: /home/agent/.claude-closed
+    runtime: container
     network: none
     variables:
       NODE_ENV: test
+
+# The environments that run in a container.
+render_expected_container_envs: [closed]
 
 # The script each environment stores, character for character.
 render_expected_setup_scripts:

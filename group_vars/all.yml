@@ -92,6 +92,13 @@ github_app_installation_id: "12345678"
 #               needs its own, for example /home/agent/.claude-second.
 #   capacity    The most sessions this environment runs at once. Left out,
 #               it is 12, which suits 64 GB.
+#   runtime     host or container. Left out, it is host: the agent server
+#               and its sessions run on the box as the agent user, as
+#               described here. container is being built: for now it only
+#               builds the environments' base image (Ubuntu 24.04 with a
+#               cloud session's tools, localhost/nucarium-base in the agent
+#               user's Podman), and the environment still runs on the host.
+#               Setting it needs `--tags env_runtime`.
 #
 # Each environment can also have what a Claude Code cloud environment has,
 # set here on the box and shown, read-only, in Watch:
@@ -250,6 +257,10 @@ node_version: "24"
 #                               and `--tags cloud_parity` run.
 #   chrome_for_testing_version  Chrome for Testing at /usr/bin/google-chrome.
 #   gradle_version              Gradle, checked against its published sum.
+#
+# The base image of container environments (runtime: container) is built
+# from these same pins and go_version and node_version above; after changing
+# one, `--tags env_runtime` builds it again.
 playwright_version: "1.63.0"
 chrome_for_testing_version: "153.0.8010.12"
 gradle_version: "8.14.3"

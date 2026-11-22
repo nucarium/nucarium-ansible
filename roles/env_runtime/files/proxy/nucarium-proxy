@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Starts one environment's proxy: mitmdump with Nucarium's addon.
+
+It listens on the environment's internal network only, at the address of
+the interface named NUCARIUM_PROXY_INTERFACE, on NUCARIUM_PROXY_PORT. The
+egress network's interface has nothing listening.
+
+It refuses to start when the addon does not load or the rules file is not
+valid: mitmproxy would otherwise run without the addon, and allow every
+host.
+"""
+import fcntl
+import os
+import socket
+import struct
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SIOCGIFADDR = 0x8915
+
+
+def ipv4_address(interface):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        request = struct.pack("256s", interface.encode()[:15])
+        return socket.inet_ntoa(fcntl.ioctl(s.fileno(), SIOCGIFADDR, request)[20:24])
+
+
+def main():
+    sys.path.insert(0, HERE)
+    import nucarium_proxy
+
+    try:
+        rules = nucarium_proxy.load_rules(nucarium_proxy.RULES_FILE)
+        address = ipv4_address(os.environ["NUCARIUM_PROXY_INTERFACE"])
+    except (OSError, ValueError, KeyError) as e:
+        print(f"nucarium-proxy: cannot start: {e!r}", file=sys.stderr)
+        return 1
+    port = os.environ["NUCARIUM_PROXY_PORT"]
+    print(f"nucarium-proxy: listening on {address}:{port}, mode {rules['mode']}", file=sys.stderr, flush=True)
+    os.execvp(
+        "mitmdump",
+        [
+            "mitmdump",
+            "--listen-host", address,
+            "--listen-port", port,
+            "--scripts", os.path.join(HERE, "nucarium_proxy.py"),
+            # mitmdump's own log of each request has its path in it.
+            "--set", "flow_detail=0",
+            "--set", "termlog_verbosity=error",
+            # Plain HTTP bodies stream through rather than fill memory.
+            "--set", "stream_large_bodies=1m",
+        ],
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

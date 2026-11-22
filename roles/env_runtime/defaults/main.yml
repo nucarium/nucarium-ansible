@@ -1,0 +1,4 @@
+---
+# Where this role's files are. Not a setting: tests/render.yml, which reads
+# them from outside the role, sets it to the same folder.
+env_runtime_role_dir: "{{ role_path }}"
