@@ -150,8 +150,14 @@
     PATH: /opt/node24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     PLAYWRIGHT_BROWSERS_PATH: "{{ cloud_parity_pw_browsers }}"
     npm_config_cache: /root/.npm
+    # The default 30 seconds is too short for a box on a slow link.
+    PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "600000"
   args:
     creates: "{{ cloud_parity_pw_browsers }}/.playwright-{{ playwright_version }}"
+  register: cloud_parity_playwright
+  retries: 3
+  delay: 10
+  until: cloud_parity_playwright.rc == 0
 
 - name: Record which Playwright the browsers are for
   ansible.builtin.copy:
