@@ -18,7 +18,7 @@ df -h / | tail -1
 # script has the base image itself), and podman images lists every tag of
 # each image a filter matches, so each tag is judged by its own name.
 in_container() {
-  [ "$(tr -d '[:space:]' < "/etc/nucarium/environments/$1/runtime" 2> /dev/null)" = container ]
+  [ "$(tr -d '[:space:]' 2> /dev/null < "/etc/nucarium/environments/$1/runtime")" = container ]
 }
 prune_tags() {
   local repo=$1 keep=$2 current ref id
