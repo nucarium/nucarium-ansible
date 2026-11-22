@@ -42,6 +42,17 @@
         mode: "0644"
       when: (playbook_dir ~ '/agent-context/AGENTS.md') is file
 
+    # A container environment gets the nucleus's AGENTS.md read-only, and
+    # does not start without one, so that it cannot plant instructions the
+    # host's sessions would read. Empty when there are none of your own.
+    - name: Make sure the nucleus has instructions, for container environments
+      ansible.builtin.copy:
+        content: ""
+        dest: "{{ nucleus_root }}/AGENTS.md"
+        mode: "0644"
+        force: false
+      when: nucarium_container_envs | length > 0
+
     # An entry with a slash names its owner (other-org/tools); a bare name
     # belongs to github_org. Sessions see each repo under its GitHub slug.
     - name: Make each repository available

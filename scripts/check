@@ -46,7 +46,7 @@ ansible-playbook tests/render.yml -e @tests/three-networks.yml
 echo "== render the container environments' networks and proxies"
 ansible-playbook tests/proxy.yml
 
-echo "== the proxy's decisions"
+echo "== the proxy's decisions and agent-env-start's refusals"
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 echo "== refuse environments the recipe cannot set up"

@@ -473,6 +473,7 @@
           - [rw, "{{ nucleus_root }}"]
           - [ro, "{{ nucleus_root }}/.claude"]
           - [ro, "{{ nucleus_root }}/.seeds"]
+          - [ro, "{{ nucleus_root }}/AGENTS.md"]
           - [rw, "{{ env.config_dir | default('') }}"]
           - [ro, "{{ agent_home }}/.local/share/claude"]
           - [ro, "{{ agent_home }}/.local/bin"]

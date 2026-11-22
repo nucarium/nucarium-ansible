@@ -4,19 +4,26 @@
 #
 #   agent-env-start <name> <nucleus> <file>
 #
-# Stops the start, with a message, when the environment has no image yet:
-# nucarium-env-setup@<name>.service builds it, and starts this unit once it
-# is there. Otherwise writes <file>, which the unit reads for the
-# container's command line: read-only mounts, on top of the nucleus the
-# container writes, of the nucleus's AGENTS.md, which host sessions read,
-# and of each bare repository's hooks folder, so that nothing in the
-# container plants a hook the host's git would run. A repository added while
-# the container runs gets its mount at the next start.
+# Stops the start, with a message in the unit's log, when:
 #
-# Only a folder whose name a repository can have is mounted, and only when
-# neither it nor its hooks folder is a link; AGENTS.md only when it is a
-# file and not a link: anything else would let a session choose what the
-# next container mounts.
+# - one of the nucleus's files that the container mounts read-only, because
+#   the host's own environments run or read them outside any sandbox, is
+#   missing, a link, or not what it should be: .claude/ and .seeds/
+#   folders, .claude/settings.json and AGENTS.md files. A container started
+#   anyway could create the file, or a link in its place, where the host
+#   would then read it. The recipe makes all four; one that is wrong now
+#   was changed on the box since, and is the operator's to look at.
+# - the environment has no image yet: nucarium-env-setup@<name>.service
+#   builds it, and starts this unit once it is there.
+#
+# Otherwise writes <file>, which the unit reads for the container's command
+# line: a read-only mount, on top of the nucleus the container writes, of
+# each bare repository's hooks folder, so that nothing in the container
+# plants a hook the host's git would run. A repository added while the
+# container runs gets its mount at the next start. Only a folder whose name
+# a repository can have is mounted, and only when neither it nor its hooks
+# folder is a link: anything else would let a session choose what the next
+# container mounts.
 set -euo pipefail
 
 name="${1:?usage: agent-env-start <name> <nucleus> <file>}"
@@ -28,6 +35,25 @@ case "$name" in -* | *[!a-z0-9-]*)
   ;;
 esac
 
+refuse() {
+  echo "Environment $name's agent server does not start: $1 in the nucleus is $2, and must be $3, which the container gets read-only."
+  echo "Put it back as it was (the playbook's --tags workspace makes it again), then start agent-env-$name.service."
+  exit 1
+}
+for want in d:.claude f:.claude/settings.json d:.seeds f:AGENTS.md; do
+  kind=${want%%:*}
+  path="$nucleus/${want#*:}"
+  label=${want#*:}
+  if [ "$kind" = d ]; then what="a folder"; else what="a file"; fi
+  if [ -L "$path" ]; then
+    refuse "$label" "a link" "$what"
+  elif [ ! -e "$path" ]; then
+    refuse "$label" "missing" "$what"
+  elif { [ "$kind" = d ] && [ ! -d "$path" ]; } || { [ "$kind" = f ] && [ ! -f "$path" ]; }; then
+    refuse "$label" "not $what" "$what"
+  fi
+done
+
 image="localhost/nucarium-env-$name:current"
 if ! podman image exists "$image"; then
   echo "Environment $name has no image yet ($image), so its agent server cannot start."
@@ -36,10 +62,6 @@ if ! podman image exists "$image"; then
 fi
 
 volumes=()
-agents="$nucleus/AGENTS.md"
-if [ -f "$agents" ] && [ ! -L "$agents" ]; then
-  volumes+=("--volume=$agents:$agents:ro")
-fi
 for repo in "$nucleus"/.repos/*.git; do
   [ -e "$repo" ] || continue
   base=${repo##*/}
