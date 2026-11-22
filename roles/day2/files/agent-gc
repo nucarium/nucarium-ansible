@@ -7,6 +7,49 @@ set -uo pipefail
 DRY_RUN="${DRY_RUN:-0}"
 echo "== agent-gc $(date -Is) dry_run=$DRY_RUN"
 df -h / | tail -1
+
+# The container environments' images. Of the base image and of each
+# environment's own, only the one :current names is kept, under :current and
+# its own tag; an environment that no longer runs in a container (its
+# runtime file, /etc/nucarium/environments/<name>/runtime, says so) keeps
+# none of its own. A tag is removed with podman rmi, which leaves an image a
+# container still runs, and the image itself goes with its last tag. An
+# image often has tags in several of these (an environment with no setup
+# script has the base image itself), and podman images lists every tag of
+# each image a filter matches, so each tag is judged by its own name.
+in_container() {
+  [ "$(tr -d '[:space:]' < "/etc/nucarium/environments/$1/runtime" 2> /dev/null)" = container ]
+}
+prune_tags() {
+  local repo=$1 keep=$2 current ref id
+  current=
+  if [ "$keep" = yes ]; then
+    current=$(podman image inspect --format '{{.Id}}' "$repo:current" 2> /dev/null) || current=
+  fi
+  podman images --noheading --no-trunc --filter "reference=$repo" --format '{{.Repository}}:{{.Tag}} {{.ID}}' |
+    while read -r ref id; do
+      [ "${ref%:*}" = "$repo" ] || continue
+      id=${id#sha256:}
+      if [ -n "$current" ] && { [ "$ref" = "$repo:current" ] || [ "$id" = "$current" ]; }; then
+        continue
+      fi
+      echo "image tag no environment uses: $ref"
+      [ "$DRY_RUN" = 1 ] || podman rmi "$ref" > /dev/null 2>&1 || true
+    done
+}
+if command -v podman > /dev/null; then
+  prune_tags localhost/nucarium-base yes
+  podman images --noheading --filter reference='localhost/nucarium-env-*' --format '{{.Repository}}' |
+    grep '^localhost/nucarium-env-[a-z0-9-]*$' | sort -u |
+    while read -r repo; do
+      if in_container "${repo#localhost/nucarium-env-}"; then
+        prune_tags "$repo" yes
+      else
+        prune_tags "$repo" no
+      fi
+    done
+fi
+
 if [ "$DRY_RUN" = 1 ]; then
   command -v podman >/dev/null && podman system df
   command -v pnpm >/dev/null && echo "pnpm store: $(pnpm store path 2>/dev/null)"
