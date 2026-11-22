@@ -105,6 +105,21 @@
         loop_var: outer
         label: "{{ outer.0.name }}.{{ outer.1.dest }}"
 
+    # The sandbox must be on, required, and offer no way around it: an agent
+    # whose sandbox fails must stop, not retry the command unconfined.
+    - name: Check each Claude Code settings file keeps commands in the sandbox
+      ansible.builtin.assert:
+        that:
+          - render_sandbox.enabled is sameas true
+          - render_sandbox.failIfUnavailable is sameas true
+          - render_sandbox.allowUnsandboxedCommands is sameas false
+        quiet: true
+      vars:
+        render_sandbox: "{{ (lookup('ansible.builtin.file', render_dir ~ '/' ~ item.name ~ '.settings.json') | from_json).sandbox }}"
+      loop: "{{ environments }}"
+      loop_control:
+        label: "{{ item.name }}.settings.json"
+
     - name: Render the closing message
       ansible.builtin.copy:
         content: "{{ lookup('ansible.builtin.template', '../templates/next-steps.j2') }}"

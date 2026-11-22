@@ -60,8 +60,15 @@
   changed_when: true
   when: users_tmpfiles is changed
 
+# Claude Code's sandbox starts bwrap, and inside it a helper that makes a
+# second, nested user namespace. Ubuntu's own profile for bwrap
+# (bwrap-userns-restrict) allows the first but moves everything inside to
+# unpriv_bwrap, which denies the capabilities the nested one needs. So the
+# check is a bwrap inside a bwrap, as the agents' commands are.
 - name: Check the command sandbox works for the agent user
-  ansible.builtin.command: bwrap --ro-bind / / true
+  ansible.builtin.command: >-
+    bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --unshare-pid --
+    bwrap --ro-bind / / --unshare-user --unshare-net true
   become: true
   become_user: "{{ agent_user }}"
   register: users_bwrap
@@ -77,12 +84,28 @@
         dest: /etc/apparmor.d/bwrap
         mode: "0644"
 
+    - name: Look for Ubuntu's own bwrap profile
+      ansible.builtin.stat:
+        path: /etc/apparmor.d/bwrap-userns-restrict
+      register: users_bwrap_ubuntu
+
+    # Both profiles are named bwrap and attach to /usr/bin/bwrap; at boot the
+    # one loaded last would win. Ubuntu's stays installed but is not loaded.
+    - name: Keep Ubuntu's own bwrap profile from loading at boot
+      ansible.builtin.file:
+        src: /etc/apparmor.d/bwrap-userns-restrict
+        dest: /etc/apparmor.d/disable/bwrap-userns-restrict
+        state: link
+      when: users_bwrap_ubuntu.stat.exists
+
     - name: Load the AppArmor profile
       ansible.builtin.command: apparmor_parser -r /etc/apparmor.d/bwrap
       changed_when: true
 
     - name: Check the sandbox again
-      ansible.builtin.command: bwrap --ro-bind / / true
+      ansible.builtin.command: >-
+        bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --unshare-pid --
+        bwrap --ro-bind / / --unshare-user --unshare-net true
       become: true
       become_user: "{{ agent_user }}"
       changed_when: false

@@ -122,10 +122,10 @@ Roles run in this order. Each has a tag of the same name.
 | `tpm` | Binds the disk key to the TPM, saves a disk-header backup to `out/` on your workstation, sets the boot-menu password, and reboots to prove the unattended unlock |
 | `network` | Tailscale (tagged), SSH hardening, firewall |
 | `nut` | UPS monitoring and the low-battery shutdown. Skipped when `nut_enabled` is false |
-| `users` | The `agent` and `broker` users, the short-lived token folder, the sandbox check |
+| `users` | The `agent` and `broker` users, the short-lived token folder, and the sandbox check: a bwrap inside a bwrap as the agent user, as Claude Code's sandbox runs. If AppArmor blocks it, installs the recipe's own bwrap profile in place of Ubuntu's `bwrap-userns-restrict` and checks again |
 | `toolchain` | GitHub CLI, Terraform if used, Go, Node, pnpm, the commit-signing key and Git identity |
 | `broker` | The GitHub App key and the timer that mints a fresh GitHub token every 20 minutes; the HCP Terraform token if used |
-| `claude` | Claude Code and, for each login, its settings file: sandbox, update channel, deny rules, the GitHub token hook and the `nucleated hook` entries. Also your `agent-context/` files |
+| `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry), update channel, deny rules, the GitHub token hook and the `nucleated hook` entries. Also your `agent-context/` files |
 | `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server |
 | `agent_servers` | One `agent-server@<name>.service` per entry in `environments`, under one shared memory cap. Enabled, not started |
 | `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token. Also the two jobs the daemon does not own: a weekly cleanup of container images, the pnpm store and the journal, and the nightly encrypted backup if configured |
