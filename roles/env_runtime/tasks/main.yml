@@ -59,9 +59,20 @@
       when: env_runtime_built is changed or env_runtime_base_current not in env_runtime_base_built_names
       changed_when: true
 
-# Each container environment's networks and proxy (tasks/proxy.yml).
+# Each container environment's networks and proxy (tasks/proxy.yml). Also
+# runs when no environment is a container one any more but proxies are still
+# set up, so that the last one switched back to the host loses its proxy too.
+- name: Read the proxy's settings
+  ansible.builtin.include_vars: proxy.yml
+
+- name: Look for proxies set up on the box
+  ansible.builtin.find:
+    paths: "{{ env_runtime_quadlet_dir }}"
+    patterns: nucarium-proxy-*.container
+  register: env_runtime_proxies_present
+
 - name: The container environments' networks and proxies
-  when: env_runtime_container_envs | length > 0
+  when: env_runtime_container_envs | length > 0 or env_runtime_proxies_present.matched > 0
   ansible.builtin.include_tasks: proxy.yml
   vars:
     env_runtime_proxy_environments: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | list }}"

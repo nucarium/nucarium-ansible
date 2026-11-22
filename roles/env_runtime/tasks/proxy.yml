@@ -7,7 +7,8 @@
 #
 # Input: env_runtime_proxy_environments, the container environments, each
 # with name, network and allowed_hosts as in environments. A proxy whose
-# environment is not in it is stopped and removed, with its networks.
+# environment is not in it is stopped and removed, with its networks; with
+# an empty list, that is all this does.
 #
 # The rules apply to the next request when they change, with no restart. A
 # changed proxy image or unit restarts the proxy, which cuts its open
@@ -20,6 +21,7 @@
   when: claude_sandbox_network is not defined
 
 - name: The proxy image, for the agent user
+  when: env_runtime_proxy_environments | length > 0
   become: true
   become_user: "{{ agent_user }}"
   environment:
@@ -54,6 +56,7 @@
       changed_when: true
 
 - name: Create root's folders for the quadlet files and the rules
+  when: env_runtime_proxy_environments | length > 0
   become: true
   ansible.builtin.file:
     path: "{{ item }}"
