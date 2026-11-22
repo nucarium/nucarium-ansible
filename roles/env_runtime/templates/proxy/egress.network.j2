@@ -1,0 +1,7 @@
+# Environment {{ env.name }}'s proxy's way out. Only the proxy is on it.
+[Unit]
+Description=Egress network of environment {{ env.name }}'s proxy
+
+[Network]
+NetworkName={{ env_runtime_egress_network }}
+Options=isolate=true

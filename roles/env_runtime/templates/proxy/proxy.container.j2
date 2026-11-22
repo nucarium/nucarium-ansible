@@ -1,0 +1,29 @@
+# Environment {{ env.name }}'s network proxy: everything its containers reach
+# outside their own network goes through it, and only what its rules allow.
+# Its log, one line per decision: journalctl --user -u {{ env_runtime_proxy_name }}
+[Unit]
+Description=Network proxy of environment {{ env.name }}
+
+[Container]
+ContainerName={{ env_runtime_proxy_name }}
+Image={{ env_runtime_proxy_image }}
+# Built on the box by the playbook; never pulled.
+Pull=never
+# The internal network under an interface name the proxy knows, so that it
+# listens there and only there; the egress network for its own connections.
+Network={{ env_runtime_network }}.network:interface_name={{ env_runtime_proxy_interface }}
+Network={{ env_runtime_egress_network }}.network
+Environment=NUCARIUM_PROXY_INTERFACE={{ env_runtime_proxy_interface }}
+Environment=NUCARIUM_PROXY_PORT={{ env_runtime_proxy_port }}
+Volume={{ env_runtime_proxy_rules_dir }}:/etc/nucarium-proxy:ro
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+
+[Service]
+Slice=agents.slice
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

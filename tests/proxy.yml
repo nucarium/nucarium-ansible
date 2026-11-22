@@ -1,0 +1,235 @@
+---
+# Renders the network files of container environments (the env_runtime
+# role's tasks/proxy.yml), on your workstation, into out/render-proxy/, and
+# checks them. One environment for each network; main-out sits beside main
+# to show their networks cannot be confused. Nothing connects to a box.
+#
+#   ansible-playbook tests/proxy.yml
+- name: Render the proxy and network files locally
+  hosts: boxes
+  connection: local
+  gather_facts: false
+  become: false
+  vars_files:
+    - ../roles/claude/vars/main.yml
+    - ../roles/env_runtime/vars/proxy.yml
+  vars:
+    render_dir: "{{ playbook_dir }}/../out/render-proxy"
+    render_role: "{{ playbook_dir }}/../roles/env_runtime"
+    agent_home: /home/{{ agent_user }}
+    agent_uid: "1001"
+    env_network: "{{ env.network | default('limited', true) }}"
+    env_allowed_hosts: "{{ env.allowed_hosts | default([], true) }}"
+    sandbox_extra_allowed_domains: [extra.example.com]
+    env_runtime_proxy_environments:
+      - name: main
+        network: limited
+        allowed_hosts: [api.example.com, "*.internal.example.com", "git.example.com:8443"]
+      - name: main-out
+        network: none
+      - name: open
+        network: full
+    # Read from what was rendered, in the checks below.
+    render_lines: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ render_file).split('\n') | map('trim') | list }}"
+    render_rules: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.rules.json') | from_json }}"
+  tasks:
+    # In the role, role_path says where its files are.
+    - name: Find the proxy image's files as the role does
+      ansible.builtin.set_fact:
+        env_runtime_proxy_src: "{{ render_role }}/files/proxy"
+
+    - name: Start from an empty folder
+      ansible.builtin.file:
+        path: "{{ render_dir }}"
+        state: "{{ item }}"
+        mode: "0700"
+      loop:
+        - absent
+        - directory
+
+    - name: Render each environment's networks and proxy
+      ansible.builtin.template:
+        src: ../roles/env_runtime/templates/proxy/{{ item.1 }}
+        dest: "{{ render_dir }}/{{ env_runtime_proxy_quadlets[item.1] }}"
+        mode: "0600"
+      vars:
+        env: "{{ item.0 }}"
+      loop: "{{ env_runtime_proxy_environments | product(['internal.network.j2', 'egress.network.j2', 'proxy.container.j2']) | list }}"
+      loop_control:
+        label: "{{ item.0.name }}: {{ item.1 }}"
+
+    - name: Write each environment's rules
+      ansible.builtin.copy:
+        content: "{{ env_runtime_proxy_rules | to_nice_json }}\n"
+        dest: "{{ render_dir }}/{{ env.name }}.rules.json"
+        mode: "0600"
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    # limited reaches what a host-mode sandbox would: the cloud list, the
+    # box's extra hosts and the environment's own. none and full list
+    # nothing (full allows every host by its mode). Claude Code's own hosts
+    # are there in every mode.
+    - name: Check each environment's rules
+      ansible.builtin.assert:
+        that:
+          - render_rules.keys() | sort == ['allow', 'always', 'mode']
+          - render_rules.mode == env.network
+          - render_rules.always == env_runtime_proxy_claude_hosts
+          - "['api.anthropic.com', 'claude.ai', 'platform.claude.com'] | difference(render_rules.always) | length == 0"
+          - env.network == 'limited' or render_rules.allow == []
+          - env.network != 'limited' or claude_cloud_allowed_domains | difference(render_rules.allow) | length == 0
+          - env.network != 'limited' or ['extra.example.com'] | difference(render_rules.allow) | length == 0
+          - env.network != 'limited' or env.allowed_hosts | difference(render_rules.allow) | length == 0
+          - env.network != 'limited' or render_rules.allow | length == render_rules.allow | unique | length
+          - "'*' not in render_rules.allow"
+        quiet: true
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    - name: Check each internal network has no route out and is isolated
+      ansible.builtin.assert:
+        that:
+          - "'[Network]' in render_lines"
+          - "('NetworkName=nucarium-' ~ env.name) in render_lines"
+          - "'Internal=true' in render_lines"
+          - "'Options=isolate=true' in render_lines"
+          # Its DNS must answer the proxy's name; aardvark-dns answers
+          # nothing else on an internal network.
+          - render_lines | select('match', 'DisableDNS=') | list == []
+        quiet: true
+      vars:
+        render_file: nucarium-{{ env.name }}.network
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ render_file }}"
+
+    - name: Check each egress network is isolated and not internal
+      ansible.builtin.assert:
+        that:
+          - "('NetworkName=nucarium-' ~ env.name ~ '.out') in render_lines"
+          - "'Options=isolate=true' in render_lines"
+          - render_lines | select('match', 'Internal=') | list == []
+        quiet: true
+      vars:
+        render_file: nucarium-{{ env.name }}.out.network
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ render_file }}"
+
+    - name: Check no two environments share a network
+      ansible.builtin.assert:
+        that:
+          - render_names | length == render_names | unique | length
+        quiet: true
+      vars:
+        render_names: >-
+          {{ env_runtime_proxy_environments | map(attribute='name') | map('regex_replace', '^', 'nucarium-') | list
+          + env_runtime_proxy_environments | map(attribute='name') | map('regex_replace', '^(.*)$', 'nucarium-\1.out') | list }}
+
+    # On both networks, listening on the internal one only: at the address
+    # of the interface it gives that network, and published nowhere.
+    - name: Check each proxy
+      ansible.builtin.assert:
+        that:
+          - "('ContainerName=nucarium-proxy-' ~ env.name) in render_lines"
+          - "('Image=' ~ env_runtime_proxy_image) in render_lines"
+          - env_runtime_proxy_image is match('^localhost/nucarium-proxy:[0-9a-f]{16}$')
+          - "'Pull=never' in render_lines"
+          - render_networks == ['nucarium-' ~ env.name ~ '.network:interface_name=' ~ render_interface, 'nucarium-' ~ env.name ~ '.out.network']
+          - render_interface | length > 0
+          - render_lines | select('match', '(PublishPort|ExposeHostPort|Network=host)') | list == []
+          - "('Volume=/etc/nucarium/proxy/' ~ env.name ~ ':/etc/nucarium-proxy:ro') in render_lines"
+          - "'ReadOnly=true' in render_lines"
+          - "'Restart=always' in render_lines"
+          - render_lines.index('Slice=agents.slice') > render_lines.index('[Service]')
+          - "'WantedBy=default.target' in render_lines"
+        quiet: true
+      vars:
+        render_file: nucarium-proxy-{{ env.name }}.container
+        render_networks: "{{ render_lines | select('match', 'Network=') | map('regex_replace', '^Network=', '') | list }}"
+        render_interface: "{{ render_lines | select('match', 'Environment=NUCARIUM_PROXY_INTERFACE=') | map('regex_replace', '^.*=', '') | first | default('') }}"
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ render_file }}"
+
+    # What a session container sets: the seven variables, all at the proxy's
+    # name and the port it listens on.
+    - name: Check the variables that send a container through its proxy
+      ansible.builtin.assert:
+        that:
+          - env_runtime_proxy_env.keys() | sort(case_sensitive=true) == ['HTTPS_PROXY', 'HTTP_PROXY', 'NODE_USE_ENV_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy']
+          - "[env_runtime_proxy_env.http_proxy, env_runtime_proxy_env.https_proxy, env_runtime_proxy_env.HTTP_PROXY, env_runtime_proxy_env.HTTPS_PROXY] | unique == ['http://nucarium-proxy-' ~ env.name ~ ':' ~ render_port]"
+          - env_runtime_proxy_env.no_proxy == env_runtime_proxy_env.NO_PROXY
+          - "'localhost' in env_runtime_proxy_env.no_proxy.split(',')"
+          - env_runtime_proxy_env.NODE_USE_ENV_PROXY == '1'
+        quiet: true
+      vars:
+        render_file: nucarium-proxy-{{ env.name }}.container
+        render_port: "{{ render_lines | select('match', 'Environment=NUCARIUM_PROXY_PORT=') | map('regex_replace', '^.*=', '') | first }}"
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    # Nothing running as the agent user may change an environment's network
+    # policy, so its files live in root's folders and the tasks that write
+    # them do so as root, with root as owner and nobody else able to write.
+    - name: Check the network files are root's
+      ansible.builtin.assert:
+        that:
+          - env_runtime_quadlet_dir == '/etc/containers/systemd/users/' ~ agent_uid
+          - env_runtime_proxy_rules_root == '/etc/nucarium/proxy'
+        quiet: true
+
+    - name: Check the tasks write them as root, root-owned
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - "{{ render_who_writes }}"
+          - "{{ render_role }}/tasks/proxy.yml"
+      vars:
+        # Every task that writes under the two folders: run as root (become,
+        # with no become_user on it or a block around it), and, unless it
+        # removes, owned by root:root with mode 0644 for a file, 0755 for a
+        # folder. Prints what is wrong; there must be such tasks.
+        render_who_writes: |
+          import sys, yaml
+          writers = ("ansible.builtin.copy", "ansible.builtin.template", "ansible.builtin.file")
+          found, wrong = 0, []
+          def walk(tasks, user):
+              global found
+              for t in tasks:
+                  u = t.get("become_user", user)
+                  if "block" in t:
+                      walk(t["block"], u)
+                      continue
+                  module = next((m for m in writers if m in t), None)
+                  if not module:
+                      continue
+                  args = t[module]
+                  # The path, or the loop it comes from.
+                  target = str(args.get("dest", args.get("path", ""))) + str(t.get("loop", ""))
+                  if "env_runtime_quadlet_dir" not in target and "env_runtime_proxy_rules" not in target:
+                      continue
+                  found += 1
+                  name = t["name"]
+                  if t.get("become") is not True or u is not None:
+                      wrong.append(f"{name}: not as root")
+                  if args.get("state") == "absent":
+                      continue
+                  mode = "0755" if args.get("state") == "directory" else "0644"
+                  if (args.get("owner"), args.get("group"), args.get("mode")) != ("root", "root", mode):
+                      wrong.append(f"{name}: not root:root {mode}")
+          walk(yaml.safe_load(open(sys.argv[1])), None)
+          print("\n".join(wrong) if wrong else f"{found} tasks write them, all as root")
+          sys.exit(1 if wrong or found < 5 else 0)
+      changed_when: false

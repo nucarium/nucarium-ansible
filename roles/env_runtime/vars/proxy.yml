@@ -1,0 +1,92 @@
+---
+# The network of each container environment: its proxy and its two networks
+# (tasks/proxy.yml). Most of these are worked out inside a loop over the
+# container environments whose loop variable is env, as site.yml's env_*
+# variables are.
+#
+#   nucarium-<name>      Internal: no route out, isolated from every other
+#                        network, and its DNS answers container names only.
+#                        The environment's containers are on this one alone.
+#   nucarium-<name>.out  The proxy's way out. A dot, not a hyphen, which no
+#                        environment name has, so that an environment called
+#                        x-out can never be given environment x's egress.
+#   nucarium-proxy-<name>  The proxy, on both, listening on the internal one
+#                        only.
+
+# Claude Code's own hosts, which an environment reaches whatever its network,
+# as a cloud session reaches the model at None. From Claude Code's network
+# access requirements (code.claude.com/docs/en/network-config, checked
+# 2026-11-23): the hosts Anthropic runs. Left out on purpose are the shared
+# hosts on that page (github.com, raw.githubusercontent.com,
+# registry.npmjs.org, storage.googleapis.com, the Datadog intake hosts,
+# googlesource.com, formulae.brew.sh): anyone can publish to them, so with
+# them none would not be none. limited has the ones it needs.
+env_runtime_proxy_claude_hosts:
+  - api.anthropic.com
+  - claude.ai
+  - claude.com
+  - platform.claude.com
+  - sso.claude.com
+  - code.claude.com
+  - downloads.claude.ai
+  - mcp-proxy.anthropic.com
+  - bridge.claudeusercontent.com
+  - "*.frame.claudeusercontent.com"
+
+# Where the proxy listens: this port, on the interface the proxy container
+# gives the internal network.
+env_runtime_proxy_port: 3128
+env_runtime_proxy_interface: nucarium0
+
+# The proxy image, tagged with a hash of what it is built from, so a changed
+# file is a new image and an unchanged one is never built again.
+env_runtime_proxy_src: "{{ role_path }}/files/proxy"
+env_runtime_proxy_files: [Containerfile, nucarium-proxy, nucarium_proxy.py]
+env_runtime_proxy_hash: >-
+  {{ (query('ansible.builtin.file', *(env_runtime_proxy_files | map('regex_replace', '^', env_runtime_proxy_src ~ '/')), rstrip=false)
+  | zip(env_runtime_proxy_files) | map('join', '\n') | join('\n') | hash('sha256'))[:16] }}
+env_runtime_proxy_image: localhost/nucarium-proxy:{{ env_runtime_proxy_hash }}
+
+# The networks' and proxies' quadlet files and the proxies' rules are root's,
+# so that nothing running as the agent user rewrites an environment's network
+# policy. Podman reads the agent user's quadlets from its uid's folder under
+# /etc/containers/systemd/users as well as from its home. The rules are one
+# folder per environment, mounted as the folder so that a replaced rules.json
+# is seen. Only the proxy image's build folder is the agent user's.
+env_runtime_quadlet_dir: /etc/containers/systemd/users/{{ agent_uid }}
+env_runtime_proxy_rules_root: /etc/nucarium/proxy
+env_runtime_proxy_build_dir: "{{ agent_home }}/.local/share/nucarium/proxy-build"
+
+# One environment's names.
+env_runtime_network: nucarium-{{ env.name }}
+env_runtime_egress_network: nucarium-{{ env.name }}.out
+env_runtime_proxy_name: nucarium-proxy-{{ env.name }}
+env_runtime_proxy_rules_dir: "{{ env_runtime_proxy_rules_root }}/{{ env.name }}"
+# Its quadlet files, by template. Quadlet names each unit after its file:
+# nucarium-<name>-network.service, nucarium-<name>.out-network.service and
+# nucarium-proxy-<name>.service.
+env_runtime_proxy_quadlets:
+  internal.network.j2: "{{ env_runtime_network }}.network"
+  egress.network.j2: "{{ env_runtime_egress_network }}.network"
+  proxy.container.j2: "{{ env_runtime_proxy_name }}.container"
+
+# One environment's rules. limited's list is the one its sandbox would allow
+# on runtime: host (roles/claude/vars/main.yml): the cloud default list,
+# sandbox_extra_allowed_domains and the environment's allowed_hosts.
+env_runtime_proxy_rules:
+  mode: "{{ env_network }}"
+  allow: "{{ claude_sandbox_network.allowedDomains if env_network == 'limited' else [] }}"
+  always: "{{ env_runtime_proxy_claude_hosts }}"
+
+# What a container of the environment sets to reach the network through its
+# proxy. Node reads the variables only with NODE_USE_ENV_PROXY.
+env_runtime_proxy_url: http://{{ env_runtime_proxy_name }}:{{ env_runtime_proxy_port }}
+env_runtime_no_proxy: localhost,127.0.0.1,::1
+env_runtime_proxy_env:
+  http_proxy: "{{ env_runtime_proxy_url }}"
+  https_proxy: "{{ env_runtime_proxy_url }}"
+  HTTP_PROXY: "{{ env_runtime_proxy_url }}"
+  HTTPS_PROXY: "{{ env_runtime_proxy_url }}"
+  no_proxy: "{{ env_runtime_no_proxy }}"
+  NO_PROXY: "{{ env_runtime_no_proxy }}"
+  NODE_USE_ENV_PROXY: "1"
