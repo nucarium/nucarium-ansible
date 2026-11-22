@@ -92,6 +92,7 @@
     - name: Ask whether the box is signed in to Nucarium Watch
       ansible.builtin.command: nucleate whoami
       register: day2_whoami_before
+      check_mode: false
       changed_when: false
       failed_when: day2_whoami_before.rc not in [0, 5, 6]
       when: watch_target == 'hosted'
@@ -121,6 +122,7 @@
     - name: Ask whether Watch accepts the new token
       ansible.builtin.command: nucleate whoami
       register: day2_whoami_after
+      check_mode: false
       changed_when: false
       failed_when: day2_whoami_after.rc not in [0, 5, 6]
       when: day2_login is not skipped

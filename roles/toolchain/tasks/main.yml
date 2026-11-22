@@ -97,6 +97,7 @@
 - name: Check the installed Go version
   ansible.builtin.command: /usr/local/go/bin/go version
   register: toolchain_go
+  check_mode: false
   changed_when: false
   failed_when: false
 

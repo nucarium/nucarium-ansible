@@ -72,6 +72,7 @@
   become: true
   become_user: "{{ agent_user }}"
   register: users_bwrap
+  check_mode: false
   changed_when: false
   failed_when: false
 
