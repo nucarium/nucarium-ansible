@@ -69,6 +69,13 @@ class AgentEnvStart(unittest.TestCase):
         with open(self.out) as f:
             self.assertNotIn("odd.git", f.read())
 
+    def test_refuses_repos_as_a_link(self):
+        elsewhere = os.path.join(self.tmp.name, "elsewhere")
+        os.makedirs(os.path.join(elsewhere, "x.git", "hooks"))
+        os.rename(self.path(".repos"), os.path.join(self.tmp.name, "repos-moved"))
+        os.symlink(elsewhere, self.path(".repos"))
+        self.assert_refused(".repos", "a link")
+
     def test_refuses_a_missing_claude_md(self):
         os.remove(self.path("CLAUDE.md"))
         self.assert_refused("CLAUDE.md", "missing")
