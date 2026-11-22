@@ -57,11 +57,15 @@ refuse 'network is "open", and must be none, limited or full' '{"name": "main", 
 refuse 'keys the recipe does not know: netwrok' '{"name": "main", "netwrok": "full"}'
 refuse 'variables is a set of NAME: value lines' '{"name": "main", "variables": ["NODE_ENV=test"]}'
 refuse 'not shell variable names (letters, digits and _, not starting with a digit): 1ST, NODE-ENV' '{"name": "main", "variables": {"OK": "1", "1ST": "x", "NODE-ENV": "test"}}'
-refuse 'not text or a number (quote true, false and empty values): DEBUG, EMPTY' '{"name": "main", "variables": {"DEBUG": true, "EMPTY": null, "NAME": "x"}}'
+refuse 'variables has values that are not quoted text: DEBUG, EMPTY, MODE, VERSION' '{"name": "main", "variables": {"DEBUG": true, "EMPTY": null, "NAME": "x", "MODE": 493, "VERSION": 3.10}}'
 refuse 'allowed_hosts adds hosts to limited only, and network is full' '{"name": "main", "network": "full", "allowed_hosts": ["api.example.com"]}'
-refuse 'allowed_hosts has "*" in it' '{"name": "main", "allowed_hosts": ["*"]}'
+refuse 'allowed_hosts allows every host with *: to allow every host, set network: full' '{"name": "main", "allowed_hosts": ["*"]}'
+refuse 'allowed_hosts allows every host with *:443' '{"name": "main", "allowed_hosts": ["api.example.com", "*:443"]}'
 refuse 'allowed_hosts has entries that are not a host' '{"name": "main", "allowed_hosts": ["https://api.example.com/"]}'
 refuse 'allowed_hosts is a list of hosts' '{"name": "main", "allowed_hosts": "api.example.com"}'
 refuse 'setup_script is the script itself, as text' '{"name": "main", "setup_script": ["apt-get update"]}'
+# shellcheck disable=SC2016  # the ${#x} is the script's, not this one's
+refuse 'environment main: setup_script has {{, {% or {# in it' '{"name": "main", "setup_script": "n=${#x}"}'
+refuse "environment main: variables has {{, {% or {# in it, which Ansible reads as a template (see the error above). Write !unsafe" '{"name": "main", "variables": {"FORMAT": "{{.Names}}"}}'
 
 echo "== all checks passed"

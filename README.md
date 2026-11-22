@@ -39,7 +39,13 @@ read, but it has not been run end to end on real hardware.
   have its own network access (none, limited or full), more hosts,
   environment variables and a setup script, which runs as root before its
   agent server starts. They are set in `group_vars/all.yml`; Nucarium Watch
-  shows them, read-only, and says when a setup script fails.
+  shows them, read-only, and says when a setup script fails. The network
+  setting governs the commands agents run in the sandbox; Claude Code's own
+  WebFetch tool is not one of them, and can still fetch a page once a
+  permission prompt is approved, even with `network: none`. A script or a
+  variable's value with `{{`, `{%` or `{#` in it (`${#list[@]}`,
+  `--format '{{.Names}}'`) needs `!unsafe` after its key, as in
+  `setup_script: !unsafe |`, or Ansible reads it as a template.
 - **A session that feels like a cloud session.** Agents find what a Claude
   Code cloud session gives them, in the same places: Playwright's Chromium
   in `/opt/pw-browsers` with its system libraries, Chrome for Testing at

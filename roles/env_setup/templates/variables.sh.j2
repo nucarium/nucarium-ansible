@@ -3,5 +3,5 @@
 # rewrites this file. ~agent/.claude/hooks/session-env.sh adds them to every
 # new session of the environment.
 {% for name, value in env_variables.items() %}
-export {{ name }}={{ value | string | quote }}
+export {{ name }}={{ value | quote }}
 {% endfor %}

@@ -188,13 +188,38 @@
     - name: Check each variable arrives intact
       ansible.builtin.assert:
         that:
-          - render_written.keys() | map('extract', item.stdout | from_json) | list == render_written.values() | map('string') | list
+          - render_written.keys() | map('extract', item.stdout | from_json) | list == render_written.values() | list
         quiet: true
       vars:
         render_written: "{{ item.env.variables | default({}, true) }}"
       loop: "{{ render_sourced.results }}"
       loop_control:
         label: "{{ item.env.name }}.variables.sh"
+
+    # The script as the env_setup role stores it, from the same expression:
+    # text that looks like a template ({{, {% or {#) is kept as written.
+    - name: Store each environment's setup script
+      ansible.builtin.copy:
+        content: "{{ env_setup_script }}"
+        dest: "{{ render_dir }}/{{ env.name }}.setup.sh"
+        mode: "0600"
+      loop: "{{ environments | selectattr('setup_script', 'defined') | selectattr('setup_script') | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.setup.sh"
+
+    - name: Check each stored script is the one in the settings
+      ansible.builtin.assert:
+        that:
+          - render_stored == env.setup_script
+          - render_expected_setup_scripts is not defined or render_stored == render_expected_setup_scripts[env.name]
+        quiet: true
+      vars:
+        render_stored: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.setup.sh', rstrip=false) }}"
+      loop: "{{ environments | selectattr('setup_script', 'defined') | selectattr('setup_script') | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.setup.sh"
 
     # What nucleated reads and reports: exactly these six keys, with these
     # types, and counts rather than values.

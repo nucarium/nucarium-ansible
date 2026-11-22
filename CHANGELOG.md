@@ -30,6 +30,17 @@ works as it is, and each environment keeps the network it had. A key the
 recipe does not know in an entry of `environments` now stops the playbook,
 where before it was ignored.
 
+Every value in `variables` must be quoted text, and the playbook refuses one
+that is not: unquoted, YAML turns `3.10` into `3.1` and `0755` into `493`. A
+script or a value with `{{`, `{%` or `{#` in it, such as `${#list[@]}` or
+`docker ps --format '{{.Names}}'`, needs `!unsafe` after its key
+(`setup_script: !unsafe |`), or Ansible reads it as a template; the playbook
+then stops and names the environment and the key.
+
+`network` governs the commands agents run in the sandbox. Claude Code's own
+WebFetch tool is not one of them: even with `none`, it can fetch a page once
+a permission prompt is approved.
+
 ### Roles and tags
 
 | Role | What changed |
