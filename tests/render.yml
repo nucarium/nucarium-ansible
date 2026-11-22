@@ -122,7 +122,7 @@
           - render_sandbox.filesystem.allowWrite | select('match', '^~/?$') | list | length == 0
           - render_sandbox.filesystem.allowWrite | select('match', '^~/[.]?(bashrc|profile|gitconfig|npmrc|claude|claude[.]json|docker|ssh|local/bin|local/share/fnm|config)$') | list | length == 0
           - claude_pnpm_lock_dirs | select('match', '^/run/user/' ~ agent_uid ~ '/pnpm-') | list | length == 3
-          - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
+          - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml', '~/.local/state/nucleated'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
           - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 2 * (repos | length)
           - render_sandbox.excludedCommands | sort == ['docker', 'podman']
           - "['api.anthropic.com', 'registry.npmjs.org', 'pypi.org', 'crates.io', 'proxy.golang.org', 'repo1.maven.org', 'registry-1.docker.io', 'archive.ubuntu.com', '*.githubusercontent.com'] | difference(render_sandbox.network.allowedDomains) | length == 0"

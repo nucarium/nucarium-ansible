@@ -30,10 +30,13 @@ sandbox_agent_dirs:
 # names programs to run. go/bin and .cargo/bin are on the agents' PATH, which
 # commands excluded from the sandbox (podman, docker) inherit, so a binary
 # written there could run unsandboxed. The nucleate download cache is
-# unpacked by the playbook.
+# unpacked by the playbook. nucleated's state holds the spool its hooks write
+# session events to, and what it reports to Watch: a sandboxed command that
+# could write it could report sessions that never happened.
 sandbox_agent_dirs_protected:
   - go/bin
   - .cargo/bin
   - .cargo/config
   - .cargo/config.toml
   - .cache/nucarium
+  - .local/state/nucleated
