@@ -229,8 +229,8 @@ ups_ondelay: 120
 # to install, from github.com/nucarium/nucarium-cli, and the SHA-256 of its Linux
 # archive as published beside it on the releases page. The download is
 # refused unless it matches. Change both together.
-nucleate_version: "0.5.0"
-nucleate_sha256: "bf0c596275a49b4b7276d0bbad1e0a03d9d44f649da55ee1029126211e2a003e"
+nucleate_version: "0.6.0"
+nucleate_sha256: "e62bebba9704756730a8eb5054bd512355b9a3b55a19e0654e36e90b1cca0793"
 
 # For testing a build of your own: the path, on your workstation, of a
 # .tar.gz holding the two binaries, nucleate and nucleated, at its top level.
