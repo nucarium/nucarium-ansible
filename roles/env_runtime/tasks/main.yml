@@ -1,6 +1,6 @@
 ---
 # What environments that run in a container (runtime: container) need. For
-# now that is their base image: Ubuntu 24.04 with what a Claude Code cloud
+# now that is their base image and their network (below): Ubuntu 24.04 with what a Claude Code cloud
 # session has (files/base/Containerfile), built by the agent user's Podman
 # as localhost/nucarium-base:<hash>, and tagged :current. The build is the
 # agent user's own work, outside any session and its sandbox, and touches no
@@ -58,3 +58,10 @@
         argv: [podman, tag, "{{ env_runtime_base_ref }}", "{{ env_runtime_base_current }}"]
       when: env_runtime_built is changed or env_runtime_base_current not in env_runtime_base_built_names
       changed_when: true
+
+# Each container environment's networks and proxy (tasks/proxy.yml).
+- name: The container environments' networks and proxies
+  when: env_runtime_container_envs | length > 0
+  ansible.builtin.include_tasks: proxy.yml
+  vars:
+    env_runtime_proxy_environments: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | list }}"
