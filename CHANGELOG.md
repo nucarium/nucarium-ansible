@@ -23,7 +23,7 @@ Four optional keys in each entry of `environments`:
 | `network` | `limited` | What commands in the environment's sessions may reach: `none`, `limited` (the hosts a cloud session reaches by default, plus `sandbox_extra_allowed_domains`) or `full` (any host). |
 | `allowed_hosts` | `[]` | More hosts for `limited`, on top of that list. |
 | `variables` | `{}` | `NAME: value` lines set in every new session of the environment. Not secret. |
-| `setup_script` | none | A bash script run as root in the nucleus before the agent server starts: at every boot, and again whenever it changes. |
+| `setup_script` | none | A bash script run as root in `/root` (the nucleus's path is in `NUCLEUS_ROOT`) before the agent server starts: at every boot, and again whenever it changes. |
 
 No setting is renamed or removed. A settings file from before these existed
 works as it is, and each environment keeps the network it had. A key the

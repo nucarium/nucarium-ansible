@@ -105,14 +105,16 @@ github_app_installation_id: "12345678"
 #   variables      NAME: value lines, set in every new session of the
 #                  environment. Not secret: anything in this file can be read
 #                  by the agents. Quote true, false and empty values.
-#   setup_script   A bash script, run as root in the nucleus before the
-#                  agent server starts: at every boot, and once more
+#   setup_script   A bash script, run as root in /root before the agent
+#                  server starts: at every boot, and once more
 #                  whenever you change it. Running it again never restarts an
 #                  agent server or interrupts a session, and a script that
 #                  fails still lets the server start. Up to 30 minutes; its
 #                  output is in the box's journal (journalctl -u
 #                  nucarium-env-setup@<name>), and Watch says when it fails.
-#                  It must be safe to run more than once.
+#                  It must be safe to run more than once. The nucleus's
+#                  path is in $NUCLEUS_ROOT; the agent can write there, so do
+#                  anything inside it as the agent (runuser -u agent -- ...).
 #
 # Changing any of these needs `--tags claude,env_setup`; new sessions see
 # the change. For example:

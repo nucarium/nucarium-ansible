@@ -7,11 +7,18 @@
 #   journalctl -u nucarium-env-setup@main.service       # what it printed
 #
 # The script, /etc/nucarium/environments/<name>/setup.sh, runs with bash, as
-# root, with HOME=/root, in the nucleus, for at most 30 minutes. Its output
+# root, with HOME=/root, in /root, for at most 30 minutes. Its output
 # goes to the journal only. The last run is recorded, atomically, in
 # /var/lib/nucarium/environments/<name>.setup.json: running from start to
 # finish, then ok on exit 0 or failed on any other exit, with 124 for the time
 # limit and 128+n for signal n.
+#
+# It starts in /root, not in the nucleus: the agent can write the nucleus, and
+# git, npm, pip and their kind read config from the folder they start in, so a
+# root script started there runs whatever the agent left for it. The script
+# gets the nucleus's path in NUCLEUS_ROOT. Anything it runs inside the nucleus
+# as root, the agent can steer; run that part as the agent user instead
+# (runuser -u agent -- ...).
 set -euo pipefail
 
 name="${1:?usage: nucarium-env-setup <name>}"
@@ -52,10 +59,10 @@ write_status "{\"state\":\"running\",\"started_at_ms\":$started,\"script_sha256\
 echo "Running the setup script of environment $name (sha256 $sha)."
 
 rc=0
-if cd "$NUCLEUS_ROOT"; then
+if cd /root; then
   # In the background so that a stop (systemctl stop, or the box shutting
   # down) is passed on to the script and still recorded, as 128+n.
-  HOME=/root timeout --kill-after=60 "$limit_s" bash "$script" < /dev/null &
+  HOME=/root NUCLEUS_ROOT="$NUCLEUS_ROOT" timeout --kill-after=60 "$limit_s" bash "$script" < /dev/null &
   child=$!
   signalled=
   trap 'signalled=1; kill -TERM "$child" 2> /dev/null || true' TERM INT HUP
