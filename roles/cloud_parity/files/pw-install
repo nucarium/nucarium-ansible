@@ -8,13 +8,14 @@
 # stalls where curl does not, so it is asked only for the system libraries
 # and, with --dry-run, for where each browser goes and where it comes from.
 # Each download is then fetched with curl and marked installed the way
-# Playwright marks it.
+# Playwright marks it. It runs Playwright with /opt/node24's npx, or the one
+# PW_INSTALL_NPX names (the environment base image's Node line).
 set -euo pipefail
 
 version=$1
 shift
 : "${PLAYWRIGHT_BROWSERS_PATH:?set PLAYWRIGHT_BROWSERS_PATH}"
-playwright=(/opt/node24/bin/npx --yes "playwright@$version")
+playwright=("${PW_INSTALL_NPX:-/opt/node24/bin/npx}" --yes "playwright@$version")
 
 "${playwright[@]}" install-deps "$@"
 
