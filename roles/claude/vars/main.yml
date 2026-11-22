@@ -15,3 +15,13 @@ claude_nucleated_notifications:
   - elicitation_url_dialog
   - elicitation_complete
   - elicitation_response
+
+# A session's worktree keeps its git data in the bare repository, outside the
+# session folder, so the sandbox lets agents write to .repos/. Each bare
+# repository's hooks and config stay read-only: nucleated runs git there
+# outside the sandbox, and a hook or a setting such as core.fsmonitor,
+# core.sshCommand or core.hooksPath would let an agent's command run
+# unconfined.
+claude_sandbox_deny_write: >-
+  {{ repos | map('basename') | product(['hooks', 'config']) | map('join', '.git/')
+  | map('regex_replace', '^', nucleus_root ~ '/.repos/') | list }}

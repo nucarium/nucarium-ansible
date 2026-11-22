@@ -6,6 +6,16 @@
     "failIfUnavailable": true,
     "allowUnsandboxedCommands": false,
     "excludedCommands": ["podman"],
+    "filesystem": {
+      "allowWrite": [
+        "{{ nucleus_root }}/.repos",
+        "~/.cache",
+        "~/.local/share/pnpm",
+        "~/go/pkg/mod",
+        "~/.npm"
+      ],
+      "denyWrite": {{ claude_sandbox_deny_write | to_json }}
+    },
     "network": {
       "allowedDomains": [
         "github.com", "api.github.com", "*.githubusercontent.com",

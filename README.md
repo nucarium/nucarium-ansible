@@ -35,6 +35,11 @@ read, but it has not been run end to end on real hardware.
   (a Claude login), each a systemd user service that waits for the network
   and restarts itself.
   Every command an agent runs is confined by Claude Code's sandbox.
+  Commands can write to the session's own folder, to the bare repositories
+  in `~/workspace/.repos/` (a session's git data lives there, so `git fetch`,
+  `git commit` and new branches work), and to the package caches:
+  `~/.cache`, `~/.local/share/pnpm`, `~/go/pkg/mod` and `~/.npm`. Each bare
+  repository's `hooks/` and `config` stay read-only.
 - **`nucleated`, the box daemon.** One service that sends a heartbeat, records
   when a session starts, works, needs you, stops or fails, fetches the
   repositories, removes finished sessions, and saves uncommitted work to a
@@ -125,7 +130,7 @@ Roles run in this order. Each has a tag of the same name.
 | `users` | The `agent` and `broker` users, the short-lived token folder, and the sandbox check: a bwrap inside a bwrap as the agent user, as Claude Code's sandbox runs. If AppArmor blocks it, installs the recipe's own bwrap profile in place of Ubuntu's `bwrap-userns-restrict` and checks again |
 | `toolchain` | GitHub CLI, Terraform if used, Go, Node, pnpm, the commit-signing key and Git identity |
 | `broker` | The GitHub App key and the timer that mints a fresh GitHub token every 20 minutes; the HCP Terraform token if used |
-| `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry), update channel, deny rules, the GitHub token hook and the `nucleated hook` entries. Also your `agent-context/` files |
+| `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, and the paths it may write), update channel, deny rules, the GitHub token hook and the `nucleated hook` entries. Also your `agent-context/` files |
 | `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server |
 | `agent_servers` | One `agent-server@<name>.service` per entry in `environments`, under one shared memory cap. Enabled, not started |
 | `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token. Also the two jobs the daemon does not own: a weekly cleanup of container images, the pnpm store and the journal, and the nightly encrypted backup if configured |
@@ -332,6 +337,11 @@ Choices this recipe makes where the product leaves room:
   the login that ran it, even though every environment shares one nucleus.
 - **The token is stored only when needed.** `nucleate whoami` decides: a box
   that is signed in with a token Watch accepts is left alone.
+- **Agents push with `git push origin HEAD`.** A bare repository's `config`
+  is read-only to them, because `nucleated` runs git there outside the
+  sandbox and a setting such as `core.fsmonitor` or `core.sshCommand` would
+  run a command unconfined. So `git push -u` pushes but cannot record the
+  upstream. Say so in your `agent-context/` files.
 - **The weekly disk cleanup stays outside the daemon.** `nucleated` cleans up
   sessions; container images, the pnpm store and the journal are pruned by
   `agent-gc.timer`.

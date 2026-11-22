@@ -106,16 +106,22 @@
         label: "{{ outer.0.name }}.{{ outer.1.dest }}"
 
     # The sandbox must be on, required, and offer no way around it: an agent
-    # whose sandbox fails must stop, not retry the command unconfined.
+    # whose sandbox fails must stop, not retry the command unconfined. Agents
+    # may write to the bare repositories, but never to their hooks or config.
     - name: Check each Claude Code settings file keeps commands in the sandbox
       ansible.builtin.assert:
         that:
           - render_sandbox.enabled is sameas true
           - render_sandbox.failIfUnavailable is sameas true
           - render_sandbox.allowUnsandboxedCommands is sameas false
+          - nucleus_root ~ '/.repos' in render_sandbox.filesystem.allowWrite
+          - render_sandbox.filesystem.denyWrite | length == 2 * (repos | length)
+          - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
+          - render_bare | map('regex_replace', '$', '/config') | difference(render_sandbox.filesystem.denyWrite) | length == 0
         quiet: true
       vars:
         render_sandbox: "{{ (lookup('ansible.builtin.file', render_dir ~ '/' ~ item.name ~ '.settings.json') | from_json).sandbox }}"
+        render_bare: "{{ repos | map('basename') | map('regex_replace', '^(.*)$', nucleus_root ~ '/.repos/\\1.git') | list }}"
       loop: "{{ environments }}"
       loop_control:
         label: "{{ item.name }}.settings.json"
