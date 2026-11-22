@@ -1,0 +1,48 @@
+---
+# Where Playwright's browsers live, as in a cloud session. Commands see it as
+# PLAYWRIGHT_BROWSERS_PATH.
+cloud_parity_pw_browsers: /opt/pw-browsers
+
+# pnpm's lock folders in the agent user's runtime folder. The claude role
+# lets sandboxed commands write the same three (claude_pnpm_lock_dirs).
+cloud_parity_pnpm_lock_dirs:
+  - pnpm-dir-locks-{{ agent_uid }}
+  - pnpm-modules-swaps-{{ agent_uid }}
+  - pnpm-store-operation-locks-{{ agent_uid }}
+
+# Node installs a cloud session keeps under /opt beside the default one.
+cloud_parity_node_majors:
+  - "22"
+  - "24"
+
+# Python tools a cloud session has on PATH, installed with pipx for everyone.
+cloud_parity_pipx_tools:
+  - uv
+  - poetry
+  - ruff
+  - black
+  - mypy
+  - pytest
+  - conan
+
+# Packages from Ubuntu that make up the rest of a cloud session's tools.
+# PostgreSQL and Redis are installed but not started, as in a cloud session.
+cloud_parity_packages:
+  - python3-pip
+  - python3-venv
+  - pipx
+  - openjdk-21-jdk-headless
+  - maven
+  - clang
+  - cmake
+  - ninja-build
+  - pkg-config
+  - libssl-dev
+  - sqlite3
+  - zip
+  - vim
+  - nano
+  - postgresql
+  - redis-server
+  - podman-docker
+  - podman-compose

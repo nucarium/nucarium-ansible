@@ -106,16 +106,27 @@
         label: "{{ outer.0.name }}.{{ outer.1.dest }}"
 
     # The sandbox must be on, required, and offer no way around it: an agent
-    # whose sandbox fails must stop, not retry the command unconfined. Agents
-    # may write to the bare repositories, but never to their hooks or config.
+    # whose sandbox fails must stop, not retry the command unconfined. As in a
+    # cloud session, agents may write anywhere in their home (the bare
+    # repositories included), the temp folders and pnpm's lock folders, and
+    # reach every host a cloud session reaches by default. Never the keys,
+    # tokens and start-up files, nor the bare repositories' hooks and config.
     - name: Check each Claude Code settings file keeps commands in the sandbox
       ansible.builtin.assert:
         that:
           - render_sandbox.enabled is sameas true
           - render_sandbox.failIfUnavailable is sameas true
           - render_sandbox.allowUnsandboxedCommands is sameas false
-          - nucleus_root ~ '/.repos' in render_sandbox.filesystem.allowWrite
-          - render_sandbox.filesystem.denyWrite | length == 2 * (repos | length)
+          - render_sandbox.filesystem.allowWrite == ['~', '/tmp', '/var/tmp'] + claude_pnpm_lock_dirs
+          - claude_pnpm_lock_dirs | select('match', '^/run/user/' ~ agent_uid ~ '/pnpm-') | list | length == 3
+          - claude_sandbox_protected | difference(render_sandbox.filesystem.denyWrite) | length == 0
+          - "['~/.ssh', '~/.claude', '~/.npmrc', '~/.gitconfig', '~/.bashrc', '~/.local/bin', '~/.config/nucleated'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
+          - environments | map(attribute='config_dir', default='') | select | difference(render_sandbox.filesystem.denyWrite) | length == 0
+          - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 2 * (repos | length)
+          - render_sandbox.excludedCommands | sort == ['docker', 'podman']
+          - "['api.anthropic.com', 'registry.npmjs.org', 'pypi.org', 'crates.io', 'proxy.golang.org', 'repo1.maven.org', 'registry-1.docker.io', 'archive.ubuntu.com', '*.githubusercontent.com'] | difference(render_sandbox.network.allowedDomains) | length == 0"
+          - sandbox_extra_allowed_domains | default([]) | difference(render_sandbox.network.allowedDomains) | length == 0
+          - render_sandbox.network.allowedDomains | length == render_sandbox.network.allowedDomains | unique | length
           - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
           - render_bare | map('regex_replace', '$', '/config') | difference(render_sandbox.filesystem.denyWrite) | length == 0
         quiet: true

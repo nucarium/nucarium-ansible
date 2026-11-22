@@ -96,6 +96,9 @@
     - role: toolchain
       become: true
       tags: toolchain
+    - role: cloud_parity
+      become: true
+      tags: cloud_parity
     - role: broker
       become: true
       tags: broker

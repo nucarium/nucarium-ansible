@@ -179,6 +179,30 @@ nucleate_local_archive: ""
 go_version: "1.27.1"
 node_version: "24"
 
+# The rest of what agents find on the box matches a Claude Code cloud session,
+# so nothing about the box surprises them (the cloud_parity role). Three
+# versions are pinned here:
+#
+#   playwright_version          The Playwright your repositories lock.
+#                               Its Chromium is installed in /opt/pw-browsers,
+#                               with the system libraries it needs. Agents
+#                               cannot download browsers themselves: like a
+#                               cloud session, the sandbox does not allow
+#                               Playwright's download hosts. A repository that
+#                               moves to another Playwright needs this changed
+#                               and `--tags cloud_parity` run.
+#   chrome_for_testing_version  Chrome for Testing at /usr/bin/google-chrome.
+#   gradle_version              Gradle, checked against its published sum.
+playwright_version: "1.63.0"
+chrome_for_testing_version: "153.0.8010.12"
+gradle_version: "8.14.3"
+
+# Hosts sandboxed commands may reach beyond what a cloud session allows by
+# default (Claude Code's package-registry, GitHub and cloud-SDK list, kept in
+# roles/claude/vars/main.yml). One per line; a leading *. matches every
+# subdomain. Changing it needs `--tags claude`, and new sessions see it.
+sandbox_extra_allowed_domains: []
+
 # HCP Terraform token for local module downloads:
 #   none   No Terraform on this box.
 #   file   The token is read from secret_refs.hcp_token when the playbook

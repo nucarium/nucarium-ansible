@@ -35,11 +35,26 @@ read, but it has not been run end to end on real hardware.
   (a Claude login), each a systemd user service that waits for the network
   and restarts itself.
   Every command an agent runs is confined by Claude Code's sandbox.
-  Commands can write to the session's own folder, to the bare repositories
-  in `~/workspace/.repos/` (a session's git data lives there, so `git fetch`,
-  `git commit` and new branches work), and to the package caches:
-  `~/.cache`, `~/.local/share/pnpm`, `~/go/pkg/mod` and `~/.npm`. Each bare
-  repository's `hooks/` and `config` stay read-only.
+- **A session that feels like a cloud session.** Agents find what a Claude
+  Code cloud session gives them, in the same places: Playwright's Chromium
+  in `/opt/pw-browsers` with its system libraries, Chrome for Testing at
+  `/usr/bin/google-chrome`, `PLAYWRIGHT_BROWSERS_PATH`, `CHROME_PATH` and
+  `PUPPETEER_EXECUTABLE_PATH` set, Node under `/opt/node22` and
+  `/opt/node24`, Python with pip, uv, poetry, ruff, black, mypy and pytest,
+  Rust, Java 21 with Maven and Gradle, clang, cmake, ninja and conan,
+  `docker` and `docker compose` (on Podman), PostgreSQL and Redis (installed,
+  not started), yq, tmux, vim and nano. Commands may write anywhere in the
+  agent's home (the bare repositories in `~/workspace/.repos/` included),
+  `/tmp`, `/var/tmp` and pnpm's lock folders, and reach every host a cloud
+  session reaches by default, plus `sandbox_extra_allowed_domains`. What
+  stays read-only: the keys and tokens, Claude Code's own configuration,
+  the shell start-up files, the global git configuration, everything under
+  `~/.local/bin` and the systemd and `nucleated` configuration, and each bare
+  repository's `hooks/` and `config`, because a change to any of them would
+  reach a program that runs outside the sandbox. Two things still differ
+  from a cloud session: agents are not root, so they cannot install system
+  packages or start PostgreSQL and Redis themselves, and the box runs the
+  Ubuntu release it was installed with.
 - **`nucleated`, the box daemon.** One service that sends a heartbeat, records
   when a session starts, works, needs you, stops or fails, fetches the
   repositories, removes finished sessions, and saves uncommitted work to a
@@ -129,6 +144,7 @@ Roles run in this order. Each has a tag of the same name.
 | `nut` | UPS monitoring and the low-battery shutdown. Skipped when `nut_enabled` is false |
 | `users` | The `agent` and `broker` users, the short-lived token folder, and the sandbox check: a bwrap inside a bwrap as the agent user, as Claude Code's sandbox runs. If AppArmor blocks it, installs the recipe's own bwrap profile in place of Ubuntu's `bwrap-userns-restrict` and checks again |
 | `toolchain` | GitHub CLI, Terraform if used, Go, Node, pnpm, the commit-signing key and Git identity |
+| `cloud_parity` | What a Claude Code cloud session has: Playwright's Chromium (for `playwright_version`) and its system libraries in `/opt/pw-browsers`, Chrome for Testing, Node under `/opt`, the Python tools, Rust, Java with Maven and Gradle, the C/C++ tools, `docker` on Podman, PostgreSQL and Redis, the cloud session's variables for login shells, and pnpm's lock folders at every login |
 | `broker` | The GitHub App key and the timer that mints a fresh GitHub token every 20 minutes; the HCP Terraform token if used |
 | `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, and the paths it may write), update channel, deny rules, the GitHub token hook and the `nucleated hook` entries. Also your `agent-context/` files |
 | `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server |
@@ -225,7 +241,8 @@ ansible-playbook site.yml --tags claude,day2
 | To | Change | Then run |
 |---|---|---|
 | Make another repository available | `repos` (and the GitHub App's selected repositories) | `--tags workspace` |
-| Allow agents another website | `allowedDomains` in `roles/claude/templates/settings.json.j2` | `--tags claude` |
+| Allow agents another website | `sandbox_extra_allowed_domains` | `--tags claude` |
+| Follow a repository to another Playwright | `playwright_version` | `--tags cloud_parity` |
 | Add a second Claude login | `environments` | `--tags claude,workspace,agent_servers,day2`, then sign it in and start it by hand |
 | Change an environment's capacity or the memory cap | `environments`, `agents_memory_*` | `--tags agent_servers`, then restart that server |
 | Upgrade `nucleate` and `nucleated` | `nucleate_version` and `nucleate_sha256` | `--tags workspace` |
