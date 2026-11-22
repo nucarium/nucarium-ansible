@@ -1,0 +1,38 @@
+---
+# The environments that run in a container (runtime: container). With none,
+# the role does nothing.
+env_runtime_container_envs: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | map(attribute='name') | list }}"
+
+# The base image every container environment's image is built from, in the
+# agent user's Podman.
+env_runtime_base_image: localhost/nucarium-base
+
+# The base image's build folder on the box: the Containerfile and the files
+# it copies. Out of reach of sandboxed commands, which may write nothing
+# under ~/.local/share but pnpm's store (vars/sandbox.yml).
+env_runtime_base_dir: "{{ agent_home }}/.local/share/nucarium/env-base"
+
+# What goes into the build folder, under the name the Containerfile uses.
+env_runtime_base_files:
+  - src: "{{ env_runtime_role_dir }}/files/base/Containerfile"
+    dest: Containerfile
+  - src: "{{ env_runtime_role_dir }}/../cloud_parity/files/pw-install"
+    dest: pw-install
+
+# The Containerfile's ARGs, each from the pin of the same name in lower case
+# in group_vars/all.yml. tests/render.yml checks both halves of that.
+env_runtime_base_args:
+  GO_VERSION: "{{ go_version }}"
+  NODE_VERSION: "{{ node_version }}"
+  GRADLE_VERSION: "{{ gradle_version }}"
+  CHROME_FOR_TESTING_VERSION: "{{ chrome_for_testing_version }}"
+  PLAYWRIGHT_VERSION: "{{ playwright_version }}"
+
+# The image's tag: the start of a hash of the files that make it and the
+# arguments it is built with, so a change to either builds a new image and
+# no change builds nothing. :current names the newest.
+env_runtime_base_tag: >-
+  {{ (query('ansible.builtin.file', *(env_runtime_base_files | map(attribute='src')), rstrip=false)
+  + [env_runtime_base_args | to_json(sort_keys=true)]) | join('\n') | hash('sha256') | truncate(12, true, '', 0) }}
+env_runtime_base_ref: "{{ env_runtime_base_image }}:{{ env_runtime_base_tag }}"
+env_runtime_base_current: "{{ env_runtime_base_image }}:current"

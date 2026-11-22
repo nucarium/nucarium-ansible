@@ -1,0 +1,60 @@
+---
+# What environments that run in a container (runtime: container) need. For
+# now that is their base image: Ubuntu 24.04 with what a Claude Code cloud
+# session has (files/base/Containerfile), built by the agent user's Podman
+# as localhost/nucarium-base:<hash>, and tagged :current. The build is the
+# agent user's own work, outside any session and its sandbox, and touches no
+# agent server: a running container keeps the image it started with.
+# On a box with no such environment the role does nothing.
+- name: The environment base image, for the agent user
+  when: env_runtime_container_envs | length > 0
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  vars:
+    # The image already built from these files and pins, if there is one, and
+    # every name it has.
+    env_runtime_base_built: "{{ env_runtime_images.stdout | from_json | default([], true) | selectattr('Names', 'defined') | selectattr('Names', 'contains', env_runtime_base_ref) | list }}"
+    env_runtime_base_built_id: "{{ env_runtime_base_built | map(attribute='Id') | first | default('') }}"
+    env_runtime_base_built_names: "{{ env_runtime_base_built | map(attribute='Names') | flatten }}"
+  block:
+    - name: Create the base image's build folder
+      ansible.builtin.file:
+        path: "{{ env_runtime_base_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy the Containerfile and what it copies into the build folder
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ env_runtime_base_dir }}/{{ item.dest }}"
+        mode: "0644"
+      loop: "{{ env_runtime_base_files }}"
+      loop_control:
+        label: "{{ item.dest }}"
+
+    - name: List the base images already built
+      ansible.builtin.command:
+        argv: [podman, images, --format, json, --filter, "reference={{ env_runtime_base_image }}"]
+      register: env_runtime_images
+      check_mode: false
+      changed_when: false
+
+    # Slow the first time (browsers, a JDK, two Node lines), then only the
+    # layers after a changed pin.
+    - name: Build the base image, unless this one is built already
+      ansible.builtin.command:
+        argv: >-
+          {{ ['podman', 'build', '--tag', env_runtime_base_ref]
+          + (env_runtime_base_args.items() | map('join', '=') | map('regex_replace', '^', '--build-arg=') | list)
+          + [env_runtime_base_dir] }}
+      when: env_runtime_base_built_id | length == 0
+      register: env_runtime_built
+      changed_when: true
+
+    - name: Tag it as the current base image
+      ansible.builtin.command:
+        argv: [podman, tag, "{{ env_runtime_base_ref }}", "{{ env_runtime_base_current }}"]
+      when: env_runtime_built is changed or env_runtime_base_current not in env_runtime_base_built_names
+      changed_when: true

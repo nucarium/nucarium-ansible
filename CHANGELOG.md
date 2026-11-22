@@ -4,6 +4,46 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## The base image of container environments
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+The first step towards running each environment in its own container. An
+environment can now say `runtime: container`, and the playbook then builds
+the image such environments start from: Ubuntu 24.04 with what a Claude Code
+cloud session has, for root. The environment itself still runs on the host
+until a later release.
+
+### Settings added
+
+One optional key in each entry of `environments`:
+
+| Setting | Default | What it is |
+|---|---|---|
+| `runtime` | `host` | Where the environment runs: `host` (on the box as the agent user, as before) or `container`, which is being built and for now only builds the base image. |
+
+No setting is renamed or removed, and a settings file without `runtime`
+works as it is. A value other than `host` or `container` stops the
+playbook. The image is built from the existing pins: `go_version`,
+`node_version`, `playwright_version`, `chrome_for_testing_version` and
+`gradle_version`.
+
+### Roles and tags
+
+| Role | What changed |
+|---|---|
+| `env_runtime` | New, tag `env_runtime`. With at least one environment set to `runtime: container`, builds `localhost/nucarium-base:<hash>` in the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and tags it `:current`; the hash is of the Containerfile, what it copies and the pins, so it is built again only when one of them changes. With none, it does nothing. |
+| `cloud_parity` | `pw-install` can run Playwright with another Node's `npx` (`PW_INSTALL_NPX`); on the box it still uses `/opt/node24`. |
+
+### A box built with an earlier copy of the recipe
+
+Nothing to do: with no environment set to `runtime: container`, nothing
+changes. To build the base image, set it on an environment and run
+`ansible-playbook site.yml --tags env_runtime`. The first build downloads
+and installs several gigabytes and takes a while; it touches no agent server
+or session.
+
 ## Environments set up like a cloud environment
 
 This entry has no version number of its own: the release that carries it is

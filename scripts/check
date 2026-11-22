@@ -56,6 +56,7 @@ refuse() {
       ;;
   esac
 }
+refuse 'runtime is "docker", and must be host or container' '{"name": "main", "runtime": "docker"}'
 refuse 'network is "open", and must be none, limited or full' '{"name": "main", "network": "open"}'
 refuse 'keys the recipe does not know: netwrok' '{"name": "main", "netwrok": "full"}'
 refuse 'variables is a set of NAME: value lines' '{"name": "main", "variables": ["NODE_ENV=test"]}'

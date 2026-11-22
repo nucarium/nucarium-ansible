@@ -1,0 +1,159 @@
+# The base of every container environment (runtime: container): Ubuntu 24.04
+# with what a Claude Code cloud session has, where a cloud session has it,
+# for root. Each environment's own image is this plus its setup script.
+#
+# The env_runtime role builds it as the agent user, from a folder holding
+# this file and roles/cloud_parity/files/pw-install:
+#
+#   podman build --build-arg GO_VERSION=<go_version> ... --tag localhost/nucarium-base:<hash> .
+#
+# Each ARG is the pin in group_vars/all.yml of the same name in lower case
+# (GO_VERSION is go_version) and has no default here, so every pin has one
+# home; tests/render.yml checks the role feeds every ARG from its pin.
+# The layers run from the slowest and least often changed to the quickest,
+# so a new pin rebuilds only what follows it.
+FROM docker.io/library/ubuntu:24.04@sha256:9a04f13b3f80ef056361e30868593b1cfd2279fe19e4081cb93a90bf56819d6a
+
+# Ubuntu's packages, and the GitHub CLI from its own package source. A
+# package's install never starts its service (policy-rc.d), so PostgreSQL and
+# Redis are installed and stopped, as in a cloud session; a container has no
+# init to start them later either. The package lists are kept, so a setup
+# script can install more without updating first.
+RUN set -eux; \
+    printf '#!/bin/sh\n# Packages never start services in this image.\nexit 101\n' > /usr/sbin/policy-rc.d; \
+    chmod 0755 /usr/sbin/policy-rc.d; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    apt-get update; \
+    apt-get install -y ca-certificates curl; \
+    install -d -m 0755 /etc/apt/keyrings; \
+    curl -fsSL -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+      https://cli.github.com/packages/githubcli-archive-keyring.gpg; \
+    printf '%s\n' 'Types: deb' 'URIs: https://cli.github.com/packages' 'Suites: stable' \
+      'Components: main' 'Architectures: amd64' \
+      'Signed-By: /etc/apt/keyrings/githubcli-archive-keyring.gpg' \
+      > /etc/apt/sources.list.d/github-cli.sources; \
+    apt-get update; \
+    apt-get install -y \
+      build-essential git curl wget unzip zip xz-utils jq ripgrep tmux \
+      ca-certificates openssh-client procps less locales \
+      python3 python3-pip python3-venv pipx \
+      openjdk-21-jdk-headless maven \
+      clang cmake ninja-build pkg-config libssl-dev \
+      sqlite3 vim nano postgresql redis-server gh
+
+# The Python tools, for everyone, where the box has them. Only this install
+# uses /opt/pipx: a session's own `pipx install` goes to /root/.local/bin.
+RUN set -eux; \
+    for tool in uv poetry ruff black mypy pytest conan; do \
+      PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin PIPX_MAN_DIR=/usr/local/share/man \
+        pipx install "$tool"; \
+    done; \
+    curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64; \
+    chmod 0755 /usr/local/bin/yq
+
+# Rust for root, with rustup's default profile.
+RUN set -eux; \
+    curl -fsSL --proto '=https' -o /tmp/rustup-init.sh https://sh.rustup.rs; \
+    CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup \
+      sh /tmp/rustup-init.sh -y --profile default --no-modify-path; \
+    rm /tmp/rustup-init.sh
+
+# Go, checked against the sum Google publishes beside it.
+ARG GO_VERSION
+RUN set -eux; \
+    test -n "$GO_VERSION"; \
+    file="go$GO_VERSION.linux-amd64.tar.gz"; \
+    curl -fsSL -o "/tmp/$file" "https://dl.google.com/go/$file"; \
+    sum=$(curl -fsSL "https://dl.google.com/go/$file.sha256"); \
+    echo "$sum  /tmp/$file" | sha256sum -c -; \
+    rm -rf /usr/local/go; \
+    tar -C /usr/local -xzf "/tmp/$file"; \
+    rm "/tmp/$file"
+
+# Node: the newest release of node_version's line and of 22, each in
+# /opt/node<major> and checked against nodejs.org's published sums, as the
+# cloud_parity role installs them on the box. pnpm through corepack, fetched
+# now so it answers without a download.
+ARG NODE_VERSION
+RUN set -eux; \
+    test -n "$NODE_VERSION"; \
+    curl -fsSL -o /tmp/node-index.json https://nodejs.org/dist/index.json; \
+    for major in "$NODE_VERSION" 22; do \
+      [ -e "/opt/node$major" ] && continue; \
+      release=$(jq -r --arg line "v$major." 'map(.version | select(startswith($line))) | first' /tmp/node-index.json); \
+      test "$release" != null; \
+      dir="node-$release-linux-x64"; \
+      curl -fsSL -o "/tmp/$dir.tar.xz" "https://nodejs.org/dist/$release/$dir.tar.xz"; \
+      curl -fsSL -o /tmp/SHASUMS256.txt "https://nodejs.org/dist/$release/SHASUMS256.txt"; \
+      (cd /tmp && grep " $dir.tar.xz\$" SHASUMS256.txt | sha256sum -c -); \
+      tar -C /opt -xJf "/tmp/$dir.tar.xz"; \
+      ln -s "/opt/$dir" "/opt/node$major"; \
+      rm "/tmp/$dir.tar.xz" /tmp/SHASUMS256.txt; \
+    done; \
+    rm /tmp/node-index.json; \
+    "/opt/node$NODE_VERSION/bin/corepack" enable pnpm; \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 PATH="/opt/node$NODE_VERSION/bin:$PATH" pnpm --version
+
+# node_version's Node first, then the places tools install into for root:
+# ~/.local/bin (pipx, uv tool), ~/.cargo/bin, Go and ~/go/bin.
+ENV PATH=/root/.local/bin:/opt/node${NODE_VERSION}/bin:/root/.cargo/bin:/usr/local/go/bin:/root/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
+# Gradle, checked against its published sum.
+ARG GRADLE_VERSION
+RUN set -eux; \
+    test -n "$GRADLE_VERSION"; \
+    file="gradle-$GRADLE_VERSION-bin.zip"; \
+    curl -fsSL -o "/tmp/$file" "https://services.gradle.org/distributions/$file"; \
+    sum=$(curl -fsSL "https://services.gradle.org/distributions/$file.sha256"); \
+    echo "$sum  /tmp/$file" | sha256sum -c -; \
+    unzip -q "/tmp/$file" -d /opt; \
+    ln -s "/opt/gradle-$GRADLE_VERSION/bin/gradle" /usr/local/bin/gradle; \
+    rm "/tmp/$file"
+
+# Chrome for Testing at /usr/bin/google-chrome, which CHROME_PATH and
+# PUPPETEER_EXECUTABLE_PATH name. Its system libraries come with Playwright's
+# Chromium below.
+ARG CHROME_FOR_TESTING_VERSION
+RUN set -eux; \
+    test -n "$CHROME_FOR_TESTING_VERSION"; \
+    dir="/opt/chrome-for-testing-$CHROME_FOR_TESTING_VERSION"; \
+    mkdir -p "$dir"; \
+    curl -fsSL -o /tmp/chrome-linux64.zip \
+      "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_FOR_TESTING_VERSION/linux64/chrome-linux64.zip"; \
+    unzip -q /tmp/chrome-linux64.zip -d "$dir"; \
+    ln -sf "$dir/chrome-linux64/chrome" /usr/bin/google-chrome; \
+    rm /tmp/chrome-linux64.zip
+
+# Playwright's Chromium and its system libraries in /opt/pw-browsers, with
+# the box's own installer.
+COPY --chmod=0755 pw-install /usr/local/sbin/pw-install
+ARG PLAYWRIGHT_VERSION
+RUN set -eux; \
+    test -n "$PLAYWRIGHT_VERSION"; \
+    DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
+      PW_INSTALL_NPX="/opt/node$NODE_VERSION/bin/npx" npm_config_cache=/root/.npm \
+      pw-install "$PLAYWRIGHT_VERSION" chromium; \
+    touch "/opt/pw-browsers/.playwright-$PLAYWRIGHT_VERSION"; \
+    chmod -R u=rwX,go=rX /opt/pw-browsers
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
+    CHROME_PATH=/usr/bin/google-chrome \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
+
+# The box's Git identity, signing and GitHub credential helper, from the
+# folder mounted at /etc/nucarium/box. A setup script may add to this file,
+# or write /root/.gitconfig, and what it writes stays in force.
+RUN printf '[include]\n\tpath = /etc/nucarium/box/gitconfig\n' > /etc/gitconfig
+
+# Everything above answers, or the build fails here rather than in a session.
+RUN set -eux; \
+    node --version; /opt/node22/bin/node --version; pnpm --version; \
+    python3 --version; uv --version; poetry --version; ruff --version; black --version; \
+    mypy --version; pytest --version; conan --version; yq --version; \
+    go version; cargo --version; rustc --version; \
+    java -version; mvn --version; gradle --version; \
+    clang --version; cmake --version; ninja --version; \
+    psql --version; redis-server --version; sqlite3 --version; gh --version; \
+    google-chrome --version; \
+    ls -d /opt/pw-browsers/chromium-*

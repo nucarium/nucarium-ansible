@@ -162,6 +162,7 @@ Roles run in this order. Each has a tag of the same name.
 | `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, the paths it may write, and the hosts its environment's `network` allows), update channel, deny rules, the session hook (GitHub token and the environment's variables) and the `nucleated hook` entries. Also your `agent-context/` files |
 | `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server |
 | `env_setup` | Each environment's variables and setup script, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which runs the script at boot and whenever it changes, records how it went in `/var/lib/nucarium/environments/<name>.setup.json`, and never restarts an agent server. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
+| `env_runtime` | For environments with `runtime: container` (being built), their base image: Ubuntu 24.04 with what a Claude Code cloud session has, for root, built by the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and the pins in `group_vars/all.yml` as `localhost/nucarium-base:<hash>`, and tagged `:current`. Built again only when the Containerfile or a pin changes. Does nothing on a box with no such environment |
 | `agent_servers` | One `agent-server@<name>.service` per entry in `environments`, under one shared memory cap, each waiting while its environment's setup script runs. Enabled, not started |
 | `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token. Also the two jobs the daemon does not own: a weekly cleanup of container images, the pnpm store and the journal, and the nightly encrypted backup if configured |
 
@@ -264,7 +265,8 @@ what a real run would do.
 | Change what one environment's sessions can reach | `network` or `allowed_hosts` in `environments` | `--tags claude,env_setup`; new sessions see it |
 | Set an environment's variables | `variables` in `environments` | `--tags env_setup`; new sessions see them |
 | Add or change an environment's setup script | `setup_script` in `environments` | `--tags env_setup`; the script runs at once, and no agent server is restarted |
-| Follow a repository to another Playwright | `playwright_version` | `--tags cloud_parity` |
+| Follow a repository to another Playwright | `playwright_version` | `--tags cloud_parity`, and `env_runtime` too if an environment runs in a container |
+| Build the base image of container environments | `runtime: container` on an environment (being built: for now only the image is built, and the environment still runs on the host) | `--tags env_runtime`; the first build takes a while, and no agent server is touched |
 | Add a second Claude login | `environments` | `--tags claude,workspace,env_setup,agent_servers,day2`, then sign it in and start it by hand |
 | Change an environment's capacity or the memory cap | `environments`, `agents_memory_*` | `--tags agent_servers`, then restart that server |
 | Upgrade `nucleate` and `nucleated` | `nucleate_version` and `nucleate_sha256` | `--tags workspace` |

@@ -15,6 +15,7 @@
     - ../roles/claude/vars/main.yml
     - ../roles/day2/vars/main.yml
     - ../roles/env_setup/vars/main.yml
+    - ../roles/env_runtime/vars/main.yml
     - ../vars/sandbox.yml
   vars:
     render_dir: "{{ playbook_dir }}/../out/render"
@@ -23,6 +24,7 @@
     nucleus_root: "{{ agent_home }}/workspace"
     env_config_dir: "{{ env.config_dir | default(agent_home ~ '/.claude') }}"
     env_claude: "{{ {} if env_config_dir == agent_home ~ '/.claude' else {'CLAUDE_CONFIG_DIR': env_config_dir} }}"
+    env_runtime: "{{ env.runtime | default('host', true) }}"
     env_network: "{{ env.network | default('limited', true) }}"
     env_allowed_hosts: "{{ env.allowed_hosts | default([], true) }}"
     env_variables: "{{ env.variables | default({}, true) }}"
@@ -35,6 +37,8 @@
         dest: settings.json
       - src: ../roles/env_setup/templates/variables.sh.j2
         dest: variables.sh
+    # Where the env_runtime role's files are, which its vars read.
+    env_runtime_role_dir: "{{ playbook_dir }}/../roles/env_runtime"
     # Stand-ins for values the real run reads from the box.
     nut_password:
       content: "{{ 'example-monitor-password' | b64encode }}"
@@ -268,6 +272,45 @@
       vars:
         render_unit: "{{ lookup('ansible.builtin.file', render_dir ~ '/nucarium-env-setup@.service').split('\n') }}"
 
+    # The base image's versions are group_vars/all.yml's pins and nothing
+    # else: every ARG in the Containerfile is fed, none has a default of its
+    # own, and each is fed the pin of its name in lower case.
+    - name: Check the base image's Containerfile takes its versions from the pins
+      ansible.builtin.assert:
+        that:
+          - render_from | length == 1
+          - render_from[0] is match('docker\.io/library/ubuntu:24\.04@sha256:[0-9a-f]{64}$')
+          - render_args | map('regex_replace', '=.*$', '') | sort == env_runtime_base_args.keys() | sort
+          - render_args | select('search', '=') | list | length == 0
+        quiet: true
+      vars:
+        render_containerfile: "{{ lookup('ansible.builtin.file', env_runtime_role_dir ~ '/files/base/Containerfile') }}"
+        render_from: "{{ render_containerfile | regex_findall('(?m)^FROM\\s+(\\S+)') }}"
+        render_args: "{{ render_containerfile | regex_findall('(?m)^ARG\\s+(\\S+)') }}"
+
+    - name: Check each build argument is its pin
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.vars', item.key | lower) | string | length > 0
+          - item.value == lookup('ansible.builtin.vars', item.key | lower) | string
+        quiet: true
+      loop: "{{ env_runtime_base_args | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Check which environments run in a container
+      ansible.builtin.assert:
+        that:
+          - env_runtime_container_envs == render_expected_container_envs | default([])
+        quiet: true
+
+    # Every task in the role acts on the box as the agent user, so one that
+    # ran here would fail: with no container environment it must do nothing.
+    - name: Run the env_runtime role, which must do nothing here
+      ansible.builtin.include_role:
+        name: env_runtime
+      when: env_runtime_container_envs | length == 0
+
     - name: Render the closing message
       ansible.builtin.copy:
         content: "{{ lookup('ansible.builtin.template', '../templates/next-steps.j2') }}"
@@ -278,6 +321,7 @@
       ansible.builtin.copy:
         content: |
           nucleate_url: {{ workspace_nucleate_url }}
+          base_image: {{ env_runtime_base_ref }}
           day2_claude_dirs: {{ day2_claude_dirs | join(' ') }}
           clone_urls: {% for item in repos %}https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git -> .repos/{{ item | basename }}.git {% endfor %}
 
