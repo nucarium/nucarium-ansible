@@ -80,6 +80,7 @@
 - name: Check Ubuntu Pro status
   ansible.builtin.command: pro status --format json
   register: base_pro_status
+  check_mode: false
   changed_when: false
   when: secrets.ubuntu_pro_token is defined
 
