@@ -5,7 +5,7 @@
 # A container environment needs a nucleate that checks git config.
 # The script and one value hold text Ansible would read as a template, so
 # they are marked !unsafe, as the comment in group_vars/all.yml says.
-nucleate_version: "0.6.0"
+nucleate_version: "0.7.0"
 environments:
   - name: main
     network: limited

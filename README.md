@@ -420,9 +420,9 @@ Choices this recipe makes where the product leaves room:
   sandbox and a setting such as `core.fsmonitor` or `core.sshCommand` would
   run a command unconfined. So `git push -u` pushes but cannot record the
   upstream. Say so in your `agent-context/` files. In a container
-  environment `config` is writable (only `hooks/` is read-only), and
-  `nucleated` relies on its own check of each repository's config before it
-  runs git there.
+  environment `config` and `hooks/` are writable, and `nucleate` and
+  `nucleated` rely on their own check of each repository's config, and run
+  git with no hooks, from `nucleate_minimum_for_containers` on.
 - **A container environment's server is held the same way.** Its container's
   main process starts the server in a tmux session and lasts as long as it,
   so `agent-env-<name>.service` too is active exactly while the server runs.

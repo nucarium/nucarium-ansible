@@ -60,6 +60,31 @@
     label: "{{ env.name }}"
   register: env_setup_runtimes
 
+# Once a login has been a container's, the host never uses it again
+# (tasks/check-container-logins.yml): one file per login, named after the
+# hash of its config_dir and holding the path. Kept when the environment is
+# removed or renamed.
+- name: Create the record of the logins container environments have used
+  ansible.builtin.file:
+    path: "{{ nucarium_container_logins_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: nucarium_container_envs | length > 0
+
+- name: Record each container environment's login
+  ansible.builtin.copy:
+    content: "{{ env.config_dir }}\n"
+    dest: "{{ nucarium_container_logins_dir }}/{{ env.config_dir | hash('sha256') }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
 - name: What a container environment's image is built from
   ansible.builtin.import_tasks: container.yml
 

@@ -42,6 +42,16 @@ while setup_pending; do
   sleep 5
 done
 
+# nucleate's MCP server, for the login in user scope, as the playbook
+# registers it on the host: a container's login is not the host's to touch.
+if [ "${AGENT_SERVER_RUNTIME:-host}" = container ]; then
+  nucleate=$(command -v nucleate)
+  if ! claude mcp get nucleate 2> /dev/null | grep -qF "$nucleate mcp"; then
+    claude mcp remove --scope user nucleate > /dev/null 2>&1 || true
+    claude mcp add --scope user nucleate -- "$nucleate" mcp
+  fi
+fi
+
 # A container's login is signed in by hand, once, from inside the container
 # (podman exec -it agent-env-<name> claude); until then the server waits
 # rather than exit and be restarted over and over.

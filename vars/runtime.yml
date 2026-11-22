@@ -4,6 +4,35 @@
 # The names of the environments that run in a container (runtime: container).
 nucarium_container_envs: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | map(attribute='name') | list }}"
 
+# The first release of nucleate and nucleated in which both check a bare
+# repository's git config (an allowlist of keys) and worktree pointers before
+# they run git there, and run git with core.hooksPath=/dev/null. A container
+# environment can write that config, so the playbook refuses one with an
+# older nucleate_version.
+nucleate_minimum_for_containers: "0.7.0"
+
+# The nucleus's own files that the box's host environments read or run
+# outside any sandbox, which every container environment gets read-only and
+# does not start without (agent-env-start checks the same list): the worktree
+# hooks a host agent server runs (.claude/settings.json, in .claude/), the
+# project MCP servers it starts (.mcp.json), the instructions host sessions
+# read (AGENTS.md, CLAUDE.md), and the seed files. A file the playbook writes
+# there it writes in place, so that a running container's read-only mount of
+# it stays on the same file.
+nucarium_nucleus_protected:
+  - .claude
+  - .seeds
+  - .mcp.json
+  - AGENTS.md
+  - CLAUDE.md
+
+# One file per Claude login a container environment has used, root's, named
+# after its config_dir. A container can write its login's folder (its MCP
+# servers, its hooks), so such a login is never used on the host again: the
+# playbook refuses runtime: host for it (tasks/check-container-logins.yml).
+# Kept when the environment is removed or renamed.
+nucarium_container_logins_dir: /etc/nucarium/container-logins
+
 # PATH in a container environment: the base image's (ENV PATH in
 # roles/env_runtime/files/base/Containerfile, which tests/render.yml checks
 # this against), then the box's own tools, mounted read-only from the host

@@ -59,6 +59,9 @@
     - name: Check each environment's settings
       ansible.builtin.import_tasks: ../tasks/check-environments.yml
 
+    - name: Check the logins of container environments
+      ansible.builtin.import_tasks: ../tasks/check-container-logins.yml
+
     - name: Start from an empty folder
       ansible.builtin.file:
         path: "{{ render_dir }}"
@@ -134,7 +137,7 @@
           - box_notify_url | length == 0 or ('token_file' in render_config.notify) == (secret_refs.box_notify_token | length > 0)
           # With a container environment, git vetting is enforced, never
           # report-only; without one the table is left out, for a nucleated
-          # older than 0.6.0.
+          # too old to know it.
           - "render_config.git | default({}) == ({'vetting': 'enforce'} if nucarium_container_envs else {})"
         quiet: true
       vars:
@@ -441,15 +444,14 @@
           - render_volumes | map('split', ':') | map('first') | list == render_mounts | map('last') | list
           - render_volumes | map('split', ':') | map('last') | map('regex_replace', '^/.*$', 'rw') | list == render_mounts | map('first') | list
           - render_volumes | map('split', ':') | map(attribute=1) | select('match', '^/root(/|$)') | list == []
-          - "'PodmanArgs=$NUCARIUM_HOOK_VOLUMES' in render_lines"
+          - render_lines | select('match', '(PodmanArgs|EnvironmentFile)=') | list == []
           - "('WorkingDir=/etc/nucarium/servers/' ~ env.name) in render_lines"
           - "'Exec=/usr/local/lib/nucarium/agent-env-hold' in render_lines"
           - "('Conflicts=agent-server@' ~ env.name ~ '.service') in render_lines"
           - "('Wants=nucarium-proxy-' ~ env.name ~ '.service') in render_lines"
           - render_lines.index('Slice=agents.slice') > render_lines.index('[Service]')
           - "('ExecCondition=/usr/local/lib/nucarium/agent-server-runtime is ' ~ env.name ~ ' container') in render_lines"
-          - "('ExecStartPre=/usr/local/lib/nucarium/agent-env-start ' ~ env.name ~ ' ' ~ nucleus_root ~ ' %t/agent-env-' ~ env.name ~ '.volumes') in render_lines"
-          - "('EnvironmentFile=-%t/agent-env-' ~ env.name ~ '.volumes') in render_lines"
+          - "('ExecStartPre=/usr/local/lib/nucarium/agent-env-start ' ~ env.name ~ ' ' ~ nucleus_root) in render_lines"
           - "('ExecStopPost=/usr/local/lib/nucarium/agent-server-runtime hand-over ' ~ env.name ~ ' container') in render_lines"
           - "'Restart=always' in render_lines"
           - "'StartLimitBurst=5' in render_lines"
@@ -473,7 +475,9 @@
           - [rw, "{{ nucleus_root }}"]
           - [ro, "{{ nucleus_root }}/.claude"]
           - [ro, "{{ nucleus_root }}/.seeds"]
+          - [ro, "{{ nucleus_root }}/.mcp.json"]
           - [ro, "{{ nucleus_root }}/AGENTS.md"]
+          - [ro, "{{ nucleus_root }}/CLAUDE.md"]
           - [rw, "{{ env.config_dir | default('') }}"]
           - [ro, "{{ agent_home }}/.local/share/claude"]
           - [ro, "{{ agent_home }}/.local/bin"]
@@ -504,6 +508,19 @@
       loop_control:
         loop_var: env
         label: "{{ env.name }}.agent-env.container"
+
+    # The files the container gets read-only are the ones agent-env-start
+    # will not start it without.
+    - name: Check agent-env-start checks every file the container gets read-only
+      ansible.builtin.assert:
+        that:
+          - render_checked | reject('equalto', '.claude/settings.json') | list | sort == nucarium_nucleus_protected | sort
+          - "'.claude/settings.json' in render_checked"
+        quiet: true
+      vars:
+        render_checked: >-
+          {{ lookup('ansible.builtin.file', playbook_dir ~ '/../roles/agent_servers/files/agent-env-start')
+          | regex_search('(?m)^for want in ([^;]+);', '\1') | first | split(' ') | map('regex_replace', '^[df]:', '') | list }}
 
     - name: Check each server folder registers nucleate's worktree hooks where they are in the container
       ansible.builtin.assert:

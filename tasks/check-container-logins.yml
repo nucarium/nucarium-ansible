@@ -1,0 +1,35 @@
+---
+# Checks, on the box, what tasks/check-environments.yml cannot know before
+# the agent user is looked up: that each container environment's login is a
+# folder directly in the agent user's home, and that no environment on the
+# host uses a login a container environment has used before
+# (nucarium_container_logins_dir, which the env_setup role writes). A
+# container can write its login's folder, its MCP servers and hooks among
+# it, and the host would run them. Imported by site.yml and by
+# tests/render.yml.
+- name: Look for the logins container environments have used
+  ansible.builtin.stat:
+    path: "{{ nucarium_container_logins_dir }}/{{ env.config_dir | hash('sha256') }}"
+    get_checksum: false
+  loop: "{{ environments | selectattr('config_dir', 'defined') | rejectattr('name', 'in', nucarium_container_envs) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  register: container_logins_used
+
+- name: Stop if one is to run on the host, or a container's login is out of place
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml:
+      {% for r in container_logins_used.results | selectattr('stat.exists') %}environment {{ r.env.name }}: its
+      config_dir {{ r.env.config_dir }} has been a container environment's login, which the container
+      could change, so it is never used on the host again: give the environment a new config_dir
+      (a new login, signed in again) to run it on the host; {% endfor %}{% for e in container_logins_misplaced %}environment
+      {{ e.name }}: runtime is container, whose config_dir must be directly in the agent user's home
+      ({{ agent_home }}), and is {{ e.config_dir }}; {% endfor %}
+      nothing on the box has been changed.
+  when: container_logins_used.results | selectattr('stat.exists') | list | length > 0 or container_logins_misplaced | length > 0
+  vars:
+    container_logins_misplaced: >-
+      {{ environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('config_dir', 'defined')
+      | rejectattr('config_dir', 'match', '^' ~ (agent_home | regex_escape) ~ '/[^/]+/?$') | list }}

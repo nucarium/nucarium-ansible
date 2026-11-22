@@ -102,12 +102,19 @@ github_app_installation_id: "12345678"
 #               built into the image, its network is enforced by a proxy of
 #               its own, and nothing it installs or starts reaches the box or
 #               another environment. It shares the nucleus, the GitHub App
-#               and Claude Code with the box, and needs its own config_dir
-#               and nucleate 0.6.0 or later (nucleate_version): a container
-#               can write the bare repositories' config, and from 0.6.0
-#               nucleated checks it before running git there, which the
-#               recipe then enforces. The nucleus's .claude, .seeds,
-#               AGENTS.md and each repository's hooks are read-only in it.
+#               and Claude Code with the box. It needs a config_dir of its
+#               own, directly in the agent user's home and named
+#               .claude-<something> (/home/agent/.claude-<name>): the
+#               container can write that login, so once it has been a
+#               container's the playbook refuses it on the host, and moving
+#               the environment back needs a new config_dir and a new
+#               sign-in. It also needs nucleate_version at
+#               nucleate_minimum_for_containers (vars/runtime.yml) or later:
+#               a container can write the bare repositories' config and
+#               hooks, and from that release nucleate and nucleated check the
+#               config, and run no hook, before they run git there; the
+#               recipe enforces the check. The nucleus's .claude, .seeds,
+#               .mcp.json, AGENTS.md and CLAUDE.md are read-only in it.
 #               Changing it takes effect when the environment's agent server
 #               next stops by itself (after about ten minutes with no
 #               session), never mid-session; it needs

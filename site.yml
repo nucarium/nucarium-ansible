@@ -95,6 +95,11 @@
       ansible.builtin.import_tasks: tasks/agent-user.yml
       tags: always
 
+    - name: Check the logins of container environments
+      ansible.builtin.import_tasks: tasks/check-container-logins.yml
+      when: agent_home is defined
+      tags: always
+
   roles:
     - role: base
       become: true

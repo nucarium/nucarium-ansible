@@ -35,22 +35,54 @@
         dest: "{{ nucleus_root }}/.claude/settings.json"
         mode: "0644"
 
-    - name: Install the nucleus instructions
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/agent-context/AGENTS.md"
-        dest: "{{ nucleus_root }}/AGENTS.md"
-        mode: "0644"
+    # Written in place, never replaced, so that a container environment's
+    # read-only mount of it stays on this file and sees the new text from its
+    # next start (a replaced file would leave the mount on the old one).
+    - name: Look at the nucleus instructions on the box
+      ansible.builtin.stat:
+        path: "{{ nucleus_root }}/AGENTS.md"
+        checksum_algorithm: sha1
+      register: workspace_agents_md
       when: (playbook_dir ~ '/agent-context/AGENTS.md') is file
 
-    # A container environment gets the nucleus's AGENTS.md read-only, and
-    # does not start without one, so that it cannot plant instructions the
-    # host's sessions would read. Empty when there are none of your own.
-    - name: Make sure the nucleus has instructions, for container environments
+    - name: Remove a link where the instructions belong
+      ansible.builtin.file:
+        path: "{{ nucleus_root }}/AGENTS.md"
+        state: absent
+      when:
+        - workspace_agents_md is not skipped
+        - workspace_agents_md.stat.islnk | default(false)
+
+    - name: Install the nucleus instructions
+      ansible.builtin.command:
+        argv: [sh, -c, 'cat > "$1"', sh, "{{ nucleus_root }}/AGENTS.md"]
+        stdin: "{{ workspace_agents_source }}"
+        stdin_add_newline: false
+      vars:
+        workspace_agents_source: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/agent-context/AGENTS.md', rstrip=false) }}"
+      changed_when: true
+      when:
+        - workspace_agents_md is not skipped
+        - workspace_agents_md.stat.islnk | default(false) or workspace_agents_md.stat.checksum | default('') != workspace_agents_source | hash('sha1')
+
+    # A container environment gets these read-only and does not start without
+    # them (nucarium_nucleus_protected), so that it cannot plant what the
+    # host's environments would read: empty ones when you have none.
+    - name: Make sure the nucleus has the files container environments need
       ansible.builtin.copy:
-        content: ""
-        dest: "{{ nucleus_root }}/AGENTS.md"
+        content: "{{ item.content }}"
+        dest: "{{ nucleus_root }}/{{ item.path }}"
         mode: "0644"
         force: false
+      loop:
+        - path: AGENTS.md
+          content: ""
+        - path: CLAUDE.md
+          content: ""
+        - path: .mcp.json
+          content: "{\"mcpServers\": {}}\n"
+      loop_control:
+        label: "{{ item.path }}"
       when: nucarium_container_envs | length > 0
 
     # An entry with a slash names its owner (other-org/tools); a bare name
@@ -69,10 +101,14 @@
 
     # User scope, once per Claude login: a session's own folder is
     # .worktrees/<session>/, where project-level MCP settings are not found.
+    # Only for the logins on the host: claude mcp get starts the servers a
+    # login names, and a container environment's login is the container's
+    # to write, so it is never run here. Its agent server registers the
+    # server itself, inside its container, at every start.
     - name: Check whether each login has the nucleate MCP server
       ansible.builtin.command: claude mcp get nucleate
       environment: "{{ env_claude }}"
-      loop: "{{ environments }}"
+      loop: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | list }}"
       loop_control:
         loop_var: env
         label: "{{ env.name }}"

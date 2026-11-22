@@ -2,33 +2,24 @@
 # Runs before agent-env-<name>.service starts the environment's container
 # (its ExecStartPre), as the agent user:
 #
-#   agent-env-start <name> <nucleus> <file>
+#   agent-env-start <name> <nucleus>
 #
 # Stops the start, with a message in the unit's log, when:
 #
-# - one of the nucleus's files that the container mounts read-only, because
-#   the host's own environments run or read them outside any sandbox, is
-#   missing, a link, or not what it should be: .claude/ and .seeds/
-#   folders, .claude/settings.json and AGENTS.md files. A container started
-#   anyway could create the file, or a link in its place, where the host
-#   would then read it. The recipe makes all four; one that is wrong now
-#   was changed on the box since, and is the operator's to look at.
+# - one of the nucleus's own files that the container gets read-only,
+#   because the host's environments read or run them outside any sandbox,
+#   is missing, a link, or not what it should be: the folders .claude/ and
+#   .seeds/, and the files .claude/settings.json, .mcp.json, AGENTS.md and
+#   CLAUDE.md (nucarium_nucleus_protected in vars/runtime.yml). A container
+#   started anyway could create the file, or a link in its place, where the
+#   host would then read it. The playbook makes all of them; one that is
+#   wrong now was changed on the box since, and is the operator's to look at.
 # - the environment has no image yet: nucarium-env-setup@<name>.service
 #   builds it, and starts this unit once it is there.
-#
-# Otherwise writes <file>, which the unit reads for the container's command
-# line: a read-only mount, on top of the nucleus the container writes, of
-# each bare repository's hooks folder, so that nothing in the container
-# plants a hook the host's git would run. A repository added while the
-# container runs gets its mount at the next start. Only a folder whose name
-# a repository can have is mounted, and only when neither it nor its hooks
-# folder is a link: anything else would let a session choose what the next
-# container mounts.
 set -euo pipefail
 
-name="${1:?usage: agent-env-start <name> <nucleus> <file>}"
-nucleus="${2:?usage: agent-env-start <name> <nucleus> <file>}"
-out="${3:?usage: agent-env-start <name> <nucleus> <file>}"
+name="${1:?usage: agent-env-start <name> <nucleus>}"
+nucleus="${2:?usage: agent-env-start <name> <nucleus>}"
 case "$name" in -* | *[!a-z0-9-]*)
   echo "agent-env-start: not an environment name: $name" >&2
   exit 2
@@ -40,10 +31,10 @@ refuse() {
   echo "Put it back as it was (the playbook's --tags workspace makes it again), then start agent-env-$name.service."
   exit 1
 }
-for want in d:.claude f:.claude/settings.json d:.seeds f:AGENTS.md; do
+for want in d:.claude f:.claude/settings.json d:.seeds f:.mcp.json f:AGENTS.md f:CLAUDE.md; do
   kind=${want%%:*}
-  path="$nucleus/${want#*:}"
   label=${want#*:}
+  path="$nucleus/$label"
   if [ "$kind" = d ]; then what="a folder"; else what="a file"; fi
   if [ -L "$path" ]; then
     refuse "$label" "a link" "$what"
@@ -60,19 +51,3 @@ if ! podman image exists "$image"; then
   echo "nucarium-env-setup@$name.service builds it and then starts this unit; to see how that went: sudo journalctl -u nucarium-env-setup@$name.service"
   exit 1
 fi
-
-volumes=()
-for repo in "$nucleus"/.repos/*.git; do
-  [ -e "$repo" ] || continue
-  base=${repo##*/}
-  hooks="$repo/hooks"
-  if ! [[ "$base" =~ ^[A-Za-z0-9._-]+\.git$ ]] || [ -L "$repo" ] || [ -L "$hooks" ] || [ ! -d "$hooks" ]; then
-    echo "agent-env-start: not mounting $hooks read-only: not a repository's own hooks folder" >&2
-    continue
-  fi
-  volumes+=("--volume=$hooks:$hooks:ro")
-done
-
-tmp=$(mktemp "$out.XXXXXX")
-printf 'NUCARIUM_HOOK_VOLUMES=%s\n' "${volumes[*]}" > "$tmp"
-mv -f "$tmp" "$out"
