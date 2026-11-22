@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 shell_files="
   scripts/check
   roles/agent_servers/files/agent-server
+  roles/agent_servers/files/agent-server-stop
   roles/claude/files/session-env.sh
   roles/claude/files/terraform-credentials-agentvault
   roles/day2/files/agent-gc

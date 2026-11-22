@@ -7,11 +7,14 @@ Type=forking
 Slice=agents.slice
 # Capacity, session-name prefix and, for a second login, CLAUDE_CONFIG_DIR.
 EnvironmentFile=%h/.config/agent-servers/%i.env
-# Its own tmux server, so this unit holds exactly this server's processes
-# and is active exactly while the server runs, which is how nucleated tells
-# that it is alive. Look at it with: tmux -L agent-%i attach
+# Its own tmux server, so this unit is active exactly while the server runs,
+# which is how nucleated tells that it is alive. tmux runs the server itself
+# in a scope of its own, beside this unit. Look at it with:
+# tmux -L agent-%i attach
 ExecStart=/usr/bin/tmux -L agent-%i new-session -d -s %i %h/.local/bin/agent-server
-ExecStop=/usr/bin/tmux -L agent-%i kill-server
+# Waits until the server has really gone (see the script), and succeeds when
+# it already has.
+ExecStop=%h/.local/bin/agent-server-stop %i
 Restart=always
 RestartSec=15
 # When the memory cap stops one session, the others carry on.
