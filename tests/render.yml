@@ -139,7 +139,7 @@
           - render_sandbox.filesystem.allowWrite | select('match', '^~/?$') | list | length == 0
           - render_sandbox.filesystem.allowWrite | select('match', '^~/[.]?(bashrc|profile|gitconfig|npmrc|claude|claude[.]json|docker|ssh|local/bin|local/share/fnm|config)$') | list | length == 0
           - claude_pnpm_lock_dirs | select('match', '^/run/user/' ~ agent_uid ~ '/pnpm-') | list | length == 3
-          - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
+          - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml', '~/.local/state/nucleated'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
           - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 2 * (repos | length)
           - render_sandbox.excludedCommands | sort == ['docker', 'podman']
           - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
