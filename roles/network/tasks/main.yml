@@ -62,3 +62,11 @@
 - name: Turn the firewall on
   community.general.ufw:
     state: enabled
+
+- name: Prefer IPv4 when the network does not carry IPv6
+  ansible.builtin.lineinfile:
+    path: /etc/gai.conf
+    line: precedence ::ffff:0:0/96  100
+    state: "{{ 'present' if prefer_ipv4 | default(false) | bool else 'absent' }}"
+    create: true
+    mode: "0644"

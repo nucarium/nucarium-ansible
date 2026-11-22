@@ -31,6 +31,13 @@ timezone: Etc/UTC
 # SSH over Tailscale only; do that once Tailscale is proven.
 lan_ssh_cidr: 192.168.1.0/24
 
+# Whether to prefer IPv4 when a host has both an IPv4 and an IPv6 address.
+# Set it to true when the network advertises IPv6 but does not carry it:
+# programs that try IPv6 first (Node, and so npm, pnpm and Playwright) then
+# stall on every download. Check from the box with
+# `curl -6 -sS -o /dev/null https://github.com`: a timeout means true.
+prefer_ipv4: false
+
 # The Tailscale tag the box joins your tailnet with. The tag must exist in
 # your tailnet's access controls, where it stops the box opening connections
 # to your other devices.
