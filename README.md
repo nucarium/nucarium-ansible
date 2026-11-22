@@ -35,6 +35,11 @@ read, but it has not been run end to end on real hardware.
   (a Claude login), each a systemd user service that waits for the network
   and restarts itself.
   Every command an agent runs is confined by Claude Code's sandbox.
+- **Environments set up like a cloud environment.** Each environment can
+  have its own network access (none, limited or full), more hosts,
+  environment variables and a setup script, which runs as root before its
+  agent server starts. They are set in `group_vars/all.yml`; Nucarium Watch
+  shows them, read-only, and says when a setup script fails.
 - **A session that feels like a cloud session.** Agents find what a Claude
   Code cloud session gives them, in the same places: Playwright's Chromium
   in `/opt/pw-browsers` with its system libraries, Chrome for Testing at
@@ -44,7 +49,8 @@ read, but it has not been run end to end on real hardware.
   Rust, Java 21 with Maven and Gradle, clang, cmake, ninja and conan,
   `docker` and `docker compose` (on Podman), PostgreSQL and Redis (installed,
   not started), yq, tmux, vim and nano. They reach every host a cloud
-  session reaches by default, plus `sandbox_extra_allowed_domains`.
+  session reaches by default, plus `sandbox_extra_allowed_domains`, unless
+  their environment's `network` says none or full.
   Commands may write only where `vars/sandbox.yml` says: the nucleus (the
   bare repositories in `~/workspace/.repos/` included), the package and
   build caches (`~/.cache`, `~/.npm`, pnpm's store and lock folders, `~/go`,
@@ -147,9 +153,10 @@ Roles run in this order. Each has a tag of the same name.
 | `toolchain` | GitHub CLI, Terraform if used, Go, Node, pnpm, the commit-signing key and Git identity |
 | `cloud_parity` | What a Claude Code cloud session has: Playwright's Chromium (for `playwright_version`) and its system libraries in `/opt/pw-browsers`, Chrome for Testing, Node under `/opt`, the Python tools, Rust, Java with Maven and Gradle, the C/C++ tools, `docker` on Podman, PostgreSQL and Redis, the cloud session's variables for login shells, and pnpm's lock folders at every login |
 | `broker` | The GitHub App key and the timer that mints a fresh GitHub token every 20 minutes; the HCP Terraform token if used |
-| `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, and the paths it may write), update channel, deny rules, the GitHub token hook and the `nucleated hook` entries. Also your `agent-context/` files |
+| `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, the paths it may write, and the hosts its environment's `network` allows), update channel, deny rules, the session hook (GitHub token and the environment's variables) and the `nucleated hook` entries. Also your `agent-context/` files |
 | `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server |
-| `agent_servers` | One `agent-server@<name>.service` per entry in `environments`, under one shared memory cap. Enabled, not started |
+| `env_setup` | Each environment's variables and setup script, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which runs the script at boot and whenever it changes, records how it went in `/var/lib/nucarium/environments/<name>.setup.json`, and never restarts an agent server. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
+| `agent_servers` | One `agent-server@<name>.service` per entry in `environments`, under one shared memory cap, each waiting while its environment's setup script runs. Enabled, not started |
 | `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token. Also the two jobs the daemon does not own: a weekly cleanup of container images, the pnpm store and the journal, and the nightly encrypted backup if configured |
 
 ## Reporting to Nucarium Watch
@@ -243,8 +250,11 @@ ansible-playbook site.yml --tags claude,day2
 |---|---|---|
 | Make another repository available | `repos` (and the GitHub App's selected repositories) | `--tags workspace` |
 | Allow agents another website | `sandbox_extra_allowed_domains` | `--tags claude` |
+| Change what one environment's sessions can reach | `network` or `allowed_hosts` in `environments` | `--tags claude,env_setup`; new sessions see it |
+| Set an environment's variables | `variables` in `environments` | `--tags env_setup`; new sessions see them |
+| Add or change an environment's setup script | `setup_script` in `environments` | `--tags env_setup`; the script runs at once, and no agent server is restarted |
 | Follow a repository to another Playwright | `playwright_version` | `--tags cloud_parity` |
-| Add a second Claude login | `environments` | `--tags claude,workspace,agent_servers,day2`, then sign it in and start it by hand |
+| Add a second Claude login | `environments` | `--tags claude,workspace,env_setup,agent_servers,day2`, then sign it in and start it by hand |
 | Change an environment's capacity or the memory cap | `environments`, `agents_memory_*` | `--tags agent_servers`, then restart that server |
 | Upgrade `nucleate` and `nucleated` | `nucleate_version` and `nucleate_sha256` | `--tags workspace` |
 | Turn Watch on or off, or rotate its token | `watch_target`, the 1Password item | `--tags day2` |
@@ -271,6 +281,14 @@ nucleate whoami                       # is the box signed in to Watch
 systemctl --user status agent-server@main.service nucleated.service
 tmux -L agent-main attach             # the server's own output; Ctrl+B then D leaves
 journalctl --user -u nucleated -n 50
+cat /var/lib/nucarium/environments/main.setup.json   # the setup script's last run
+```
+
+As yourself, for the setup script's output:
+
+```bash
+sudo journalctl -u nucarium-env-setup@main.service
+sudo systemctl restart nucarium-env-setup@main.service   # run it again
 ```
 
 ## Optional: `agent-context/`
@@ -315,9 +333,12 @@ PATH="$PWD/.venv/bin:$PATH" scripts/check
 
 It syntax-checks both playbooks, runs `ansible-lint`, `yamllint` and
 `shellcheck`, and renders every template from the example settings into
-`out/render/`, in two shapes, so you can read exactly what a box would
+`out/render/`, in three shapes, so you can read exactly what a box would
 receive. It reads `nucleated`'s rendered configuration back as TOML and
-checks it against the settings. The Build workflow (`.github/workflows/build.yml`) runs the same
+checks it against the settings, checks each environment's sandbox network,
+sources each environment's variables in bash to see every value arrive
+intact, reads back the summary `nucleated` reports, and runs the playbook
+with environment entries it must refuse. The Build workflow (`.github/workflows/build.yml`) runs the same
 script on every pull request and on `main`.
 
 To run the linters and the commit-message check before each commit, install

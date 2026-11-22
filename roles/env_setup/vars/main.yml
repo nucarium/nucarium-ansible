@@ -1,0 +1,21 @@
+---
+# Root's copy of each environment's setup script and variables, one folder per
+# environment: setup.sh is root's alone (0700); variables.sh is readable by
+# the agent user, whose session hook reads it.
+env_setup_etc_dir: /etc/nucarium/environments
+# What each environment is (<name>.json, written here) and how its setup
+# script last ran (<name>.setup.json, written by nucarium-env-setup), for
+# nucleated to report to Nucarium Watch.
+env_setup_state_dir: /var/lib/nucarium/environments
+
+# <name>.json for one environment (the loop variable env). Counts, never
+# values: Watch is told how many variables and hosts there are, not what they
+# are. The repositories are the box's, under their GitHub names, at most 32.
+# Network secrets are a later step, so there are none yet.
+env_setup_summary:
+  network: "{{ env_network }}"
+  allowed_hosts: "{{ env_allowed_hosts | length if env_network == 'limited' else 0 }}"
+  repos: "{{ (repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | list)[:32] }}"
+  variables: "{{ env_variables | length }}"
+  secrets: 0
+  setup_script: "{{ env_setup_script | length > 0 }}"

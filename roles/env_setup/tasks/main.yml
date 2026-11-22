@@ -1,0 +1,160 @@
+---
+# Each environment's variables, its setup script and the summary nucleated
+# reports. Its network is in its Claude Code settings (the claude role).
+
+- name: Create the folders for the environments
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ env_setup_etc_dir | dirname }}"
+    - "{{ env_setup_etc_dir }}"
+    - "{{ env_setup_state_dir | dirname }}"
+    - "{{ env_setup_state_dir }}"
+
+- name: Create a folder for each environment
+  ansible.builtin.file:
+    path: "{{ env_setup_etc_dir }}/{{ env.name }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ environments }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
+# Not secret: anything in group_vars/all.yml is the agent's to read. Root's,
+# so that no command an agent runs can change what its next session runs.
+- name: Write each environment's variables
+  ansible.builtin.template:
+    src: variables.sh.j2
+    dest: "{{ env_setup_etc_dir }}/{{ env.name }}/variables.sh"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
+- name: Install the setup-script runner
+  ansible.builtin.copy:
+    src: nucarium-env-setup
+    dest: /usr/local/sbin/nucarium-env-setup
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the setup-script unit
+  ansible.builtin.template:
+    src: nucarium-env-setup@.service.j2
+    dest: /etc/systemd/system/nucarium-env-setup@.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: env_setup_unit
+
+- name: Store each environment's setup script
+  ansible.builtin.copy:
+    content: "{{ env_setup_script }}"
+    dest: "{{ env_setup_etc_dir }}/{{ env.name }}/setup.sh"
+    owner: root
+    group: root
+    mode: "0700"
+  loop: "{{ environments | selectattr('setup_script', 'defined') | selectattr('setup_script') | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  register: env_setup_scripts
+
+# At every boot, and now for a script that is new or changed. Without
+# waiting: the script may take its full 30 minutes, and nucleated reports how
+# it went. Neither touches an agent server or a session: those are the agent
+# user's own units, and their start script only waits for a script that is
+# running when the server starts.
+- name: Run each new or changed setup script, and at every boot
+  ansible.builtin.systemd_service:
+    name: nucarium-env-setup@{{ item.env.name }}.service
+    enabled: true
+    state: "{{ 'restarted' if item is changed else omit }}"
+    no_block: true
+    daemon_reload: "{{ env_setup_unit is changed }}"
+  loop: "{{ env_setup_scripts.results }}"
+  loop_control:
+    label: "{{ item.env.name }}"
+
+- name: Remove the setup script of each environment that no longer has one
+  ansible.builtin.file:
+    path: "{{ env_setup_etc_dir }}/{{ env.name }}/setup.sh"
+    state: absent
+  loop: "{{ environments | rejectattr('name', 'in', env_setup_scripts.results | map(attribute='env.name') | list) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  register: env_setup_removed
+
+- name: Stop running it
+  ansible.builtin.systemd_service:
+    name: nucarium-env-setup@{{ item.env.name }}.service
+    enabled: false
+    state: stopped
+  loop: "{{ env_setup_removed.results | select('changed') | list }}"
+  loop_control:
+    label: "{{ item.env.name }}"
+
+- name: Forget how it last ran
+  ansible.builtin.file:
+    path: "{{ env_setup_state_dir }}/{{ item.env.name }}.setup.json"
+    state: absent
+  loop: "{{ env_setup_removed.results }}"
+  loop_control:
+    label: "{{ item.env.name }}"
+
+# Copied to a temporary file in the same folder and renamed into place, so
+# nucleated never reads half of one.
+- name: Write what each environment is, for nucleated to report
+  ansible.builtin.copy:
+    content: "{{ env_setup_summary | to_nice_json }}\n"
+    dest: "{{ env_setup_state_dir }}/{{ env.name }}.json"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
+- name: List the environments set up on the box
+  ansible.builtin.find:
+    paths:
+      - "{{ env_setup_etc_dir }}"
+      - "{{ env_setup_state_dir }}"
+    file_type: any
+  register: env_setup_found
+
+- name: Remove environments that are no longer in the settings
+  vars:
+    env_setup_gone: >-
+      {{ env_setup_found.files | map(attribute='path') | map('basename')
+      | map('regex_replace', '(\.setup)?\.json$', '') | unique
+      | difference(environments | map(attribute='name')) }}
+  block:
+    - name: Stop running their setup scripts
+      ansible.builtin.systemd_service:
+        name: nucarium-env-setup@{{ item }}.service
+        enabled: false
+        state: stopped
+      loop: "{{ env_setup_gone }}"
+
+    - name: Remove their scripts, variables and summaries
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ env_setup_gone | map('regex_replace', '^(.*)$', env_setup_etc_dir ~ '/\1') | list
+        + env_setup_gone | map('regex_replace', '^(.*)$', env_setup_state_dir ~ '/\1.json') | list
+        + env_setup_gone | map('regex_replace', '^(.*)$', env_setup_state_dir ~ '/\1.setup.json') | list }}

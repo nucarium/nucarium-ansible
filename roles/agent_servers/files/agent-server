@@ -19,6 +19,22 @@ until curl -s -o /dev/null --max-time 5 https://api.anthropic.com/; do
   sleep 5
 done
 
+# The environment's setup script runs first: at boot, and when the recipe
+# changes it (nucarium-env-setup@<name>.service). That is a system unit and
+# this server a user unit, which systemd cannot order after one, so the wait
+# is here: while the script runs or waits to run, and no longer. A failed
+# script does not hold the server back, and a server already running is never
+# stopped for one.
+setup_unit="nucarium-env-setup@${AGENT_SERVER_NAME:-}.service"
+setup_pending() {
+  [ -n "${AGENT_SERVER_NAME:-}" ] || return 1
+  [ "$(systemctl show --property=ActiveState --value "$setup_unit" 2> /dev/null)" = activating ] ||
+    [ -n "$(systemctl list-jobs --no-legend "$setup_unit" 2> /dev/null)" ]
+}
+while setup_pending; do
+  sleep 5
+done
+
 cd "$AGENT_SERVER_ROOT"
 exec claude remote-control \
   --spawn worktree \

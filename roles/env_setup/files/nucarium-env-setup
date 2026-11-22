@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Runs one environment's setup script and records how it went, for nucleated
+# to report to Nucarium Watch. nucarium-env-setup@<name>.service runs this at
+# boot and whenever the recipe changes the script:
+#
+#   systemctl restart nucarium-env-setup@main.service   # run it again
+#   journalctl -u nucarium-env-setup@main.service       # what it printed
+#
+# The script, /etc/nucarium/environments/<name>/setup.sh, runs with bash, as
+# root, with HOME=/root, in the nucleus, for at most 30 minutes. Its output
+# goes to the journal only. The last run is recorded, atomically, in
+# /var/lib/nucarium/environments/<name>.setup.json: running from start to
+# finish, then ok on exit 0 or failed on any other exit, with 124 for the time
+# limit and 128+n for signal n.
+set -euo pipefail
+
+name="${1:?usage: nucarium-env-setup <name>}"
+case "$name" in
+  -* | *[!a-z0-9-]*)
+    echo "nucarium-env-setup: not an environment name: $name" >&2
+    exit 2
+    ;;
+esac
+: "${NUCLEUS_ROOT:?set by the service}"
+
+script="/etc/nucarium/environments/$name/setup.sh"
+limit_s=1800
+state_dir=/var/lib/nucarium/environments
+status="$state_dir/$name.setup.json"
+
+if [ ! -f "$script" ]; then
+  echo "Environment $name has no setup script."
+  exit 0
+fi
+
+now_ms() { date +%s%3N; }
+
+# A temporary file in the same folder, renamed over the old one, so a reader
+# sees the last run or this one and never half of either. A stale "running"
+# from a run the box lost power in is simply replaced.
+write_status() {
+  local tmp
+  tmp=$(mktemp "$state_dir/.$name.setup.json.XXXXXX")
+  printf '%s\n' "$1" > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$status"
+}
+
+sha=$(sha256sum "$script" | cut -d ' ' -f 1)
+started=$(now_ms)
+write_status "{\"state\":\"running\",\"started_at_ms\":$started,\"script_sha256\":\"$sha\"}"
+echo "Running the setup script of environment $name (sha256 $sha)."
+
+rc=0
+if cd "$NUCLEUS_ROOT"; then
+  # In the background so that a stop (systemctl stop, or the box shutting
+  # down) is passed on to the script and still recorded, as 128+n.
+  HOME=/root timeout --kill-after=60 "$limit_s" bash "$script" < /dev/null &
+  child=$!
+  signalled=
+  trap 'signalled=1; kill -TERM "$child" 2> /dev/null || true' TERM INT HUP
+  while :; do
+    signalled=
+    rc=0
+    wait "$child" || rc=$?
+    [ -z "$signalled" ] && break
+  done
+  trap - TERM INT HUP
+else
+  rc=1
+fi
+
+finished=$(now_ms)
+# timeout exits 124 when the script stops at its signal, but 137 when the
+# script ignored it and had to be killed. Both are the time limit.
+if [ "$rc" -eq 137 ] && [ $((finished - started)) -ge $((limit_s * 1000)) ]; then
+  rc=124
+fi
+if [ "$rc" -eq 0 ]; then state=ok; else state=failed; fi
+write_status "{\"state\":\"$state\",\"started_at_ms\":$started,\"finished_at_ms\":$finished,\"exit_code\":$rc,\"script_sha256\":\"$sha\"}"
+case "$rc" in
+  0) echo "The setup script of environment $name finished." ;;
+  124) echo "The setup script of environment $name ran for $((limit_s / 60)) minutes and was stopped." ;;
+  *) echo "The setup script of environment $name failed with exit code $rc." ;;
+esac
+exit "$rc"

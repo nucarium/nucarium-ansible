@@ -92,6 +92,41 @@ github_app_installation_id: "12345678"
 #               needs its own, for example /home/agent/.claude-second.
 #   capacity    The most sessions this environment runs at once. Left out,
 #               it is 12, which suits 64 GB.
+#
+# Each environment can also have what a Claude Code cloud environment has,
+# set here on the box and shown, read-only, in Watch:
+#
+#   network        What commands in its sessions may reach: none, limited
+#                  or full (any host). Left out, it is limited: the hosts a
+#                  cloud session reaches by default (package registries,
+#                  GitHub, cloud SDKs) plus sandbox_extra_allowed_domains.
+#   allowed_hosts  More hosts for limited, one per line, on top of that
+#                  list. A leading *. matches every subdomain.
+#   variables      NAME: value lines, set in every new session of the
+#                  environment. Not secret: anything in this file can be read
+#                  by the agents. Quote true, false and empty values.
+#   setup_script   A bash script, run as root in the nucleus before the
+#                  agent server starts: at every boot, and once more
+#                  whenever you change it. Running it again never restarts an
+#                  agent server or interrupts a session, and a script that
+#                  fails still lets the server start. Up to 30 minutes; its
+#                  output is in the box's journal (journalctl -u
+#                  nucarium-env-setup@<name>), and Watch says when it fails.
+#                  It must be safe to run more than once.
+#
+# Changing any of these needs `--tags claude,env_setup`; new sessions see
+# the change. For example:
+#
+#   - name: main
+#     network: limited
+#     allowed_hosts:
+#       - api.example.com
+#       - "*.internal.example.com"
+#     variables:
+#       NODE_ENV: development
+#       FEATURE_FLAGS: "beta,dark-mode"
+#     setup_script: |
+#       apt-get install -y --no-install-recommends libvips-dev
 environments:
   - name: main
     capacity: 12

@@ -4,6 +4,7 @@
 #
 #   ansible-playbook tests/render.yml
 #   ansible-playbook tests/render.yml -e @tests/two-logins.yml
+#   ansible-playbook tests/render.yml -e @tests/three-networks.yml
 - name: Render the templates locally
   hosts: boxes
   connection: local
@@ -13,6 +14,7 @@
     - ../roles/workspace/vars/main.yml
     - ../roles/claude/vars/main.yml
     - ../roles/day2/vars/main.yml
+    - ../roles/env_setup/vars/main.yml
     - ../vars/sandbox.yml
   vars:
     render_dir: "{{ playbook_dir }}/../out/render"
@@ -21,16 +23,27 @@
     nucleus_root: "{{ agent_home }}/workspace"
     env_config_dir: "{{ env.config_dir | default(agent_home ~ '/.claude') }}"
     env_claude: "{{ {} if env_config_dir == agent_home ~ '/.claude' else {'CLAUDE_CONFIG_DIR': env_config_dir} }}"
+    env_network: "{{ env.network | default('limited', true) }}"
+    env_allowed_hosts: "{{ env.allowed_hosts | default([], true) }}"
+    env_variables: "{{ env.variables | default({}, true) }}"
+    env_setup_script: "{{ env.setup_script | default('', true) }}"
     watch_console_url: https://app.nucarium.com
     render_per_server:
       - src: ../roles/agent_servers/templates/agent-server.env.j2
         dest: env
       - src: ../roles/claude/templates/settings.json.j2
         dest: settings.json
+      - src: ../roles/env_setup/templates/variables.sh.j2
+        dest: variables.sh
     # Stand-ins for values the real run reads from the box.
     nut_password:
       content: "{{ 'example-monitor-password' | b64encode }}"
   tasks:
+    # The same check site.yml makes first. scripts/check also runs this
+    # playbook with entries it must refuse.
+    - name: Check each environment's settings
+      ansible.builtin.import_tasks: ../tasks/check-environments.yml
+
     - name: Start from an empty folder
       ansible.builtin.file:
         path: "{{ render_dir }}"
@@ -64,6 +77,8 @@
           dest: upsd.users
         - src: ../roles/nut/templates/upsmon.conf.j2
           dest: upsmon.conf
+        - src: ../roles/env_setup/templates/nucarium-env-setup@.service.j2
+          dest: nucarium-env-setup@.service
       loop_control:
         label: "{{ item.dest }}"
 
@@ -111,7 +126,9 @@
     # may write only the folders named in vars/sandbox.yml, the nucleus, the
     # temp folders and pnpm's lock folders: never the home itself, its
     # dotfiles, the folders on their PATH, nor the bare repositories' hooks
-    # and config. They reach every host a cloud session reaches by default.
+    # and config. With network limited they reach every host a cloud session
+    # reaches by default and the environment's own; with full, any host; with
+    # none, no host, refused rather than asked about.
     - name: Check each Claude Code settings file keeps commands in the sandbox
       ansible.builtin.assert:
         that:
@@ -125,18 +142,106 @@
           - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
           - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 2 * (repos | length)
           - render_sandbox.excludedCommands | sort == ['docker', 'podman']
-          - "['api.anthropic.com', 'registry.npmjs.org', 'pypi.org', 'crates.io', 'proxy.golang.org', 'repo1.maven.org', 'registry-1.docker.io', 'archive.ubuntu.com', '*.githubusercontent.com'] | difference(render_sandbox.network.allowedDomains) | length == 0"
-          - sandbox_extra_allowed_domains | default([]) | difference(render_sandbox.network.allowedDomains) | length == 0
-          - render_sandbox.network.allowedDomains | length == render_sandbox.network.allowedDomains | unique | length
           - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
           - render_bare | map('regex_replace', '$', '/config') | difference(render_sandbox.filesystem.denyWrite) | length == 0
+          - env_network in ['none', 'limited', 'full']
+          - "env_network != 'limited' or ['api.anthropic.com', 'registry.npmjs.org', 'pypi.org', 'crates.io', 'proxy.golang.org', 'repo1.maven.org', 'registry-1.docker.io', 'archive.ubuntu.com', '*.githubusercontent.com'] | difference(render_network.allowedDomains) | length == 0"
+          - env_network != 'limited' or sandbox_extra_allowed_domains | default([]) | difference(render_network.allowedDomains) | length == 0
+          - env_network != 'limited' or env_allowed_hosts | difference(render_network.allowedDomains) | length == 0
+          - env_network != 'limited' or render_network.allowedDomains | length == render_network.allowedDomains | unique | length
+          - env_network != 'limited' or '*' not in render_network.allowedDomains
+          - env_network != 'limited' or render_network.keys() | list == ['allowedDomains']
+          - "env_network != 'full' or render_network == {'allowedDomains': ['*']}"
+          - "env_network != 'none' or render_network == {'allowedDomains': [], 'strictAllowlist': true}"
+          - render_settings.hooks.SessionStart[0].hooks[0].command == '$HOME/.claude/hooks/session-env.sh ' ~ env.name
         quiet: true
       vars:
-        render_sandbox: "{{ (lookup('ansible.builtin.file', render_dir ~ '/' ~ item.name ~ '.settings.json') | from_json).sandbox }}"
+        render_settings: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.settings.json') | from_json }}"
+        render_sandbox: "{{ render_settings.sandbox }}"
+        render_network: "{{ render_sandbox.network }}"
         render_bare: "{{ repos | map('basename') | map('regex_replace', '^(.*)$', nucleus_root ~ '/.repos/\\1.git') | list }}"
       loop: "{{ environments }}"
       loop_control:
-        label: "{{ item.name }}.settings.json"
+        loop_var: env
+        label: "{{ env.name }}.settings.json"
+
+    # Read back the way the session reads them: sourced by bash. Every value
+    # must arrive exactly as written in the settings, spaces, quotes, $,
+    # backslashes and newlines included.
+    - name: Source each environment's variables in bash
+      ansible.builtin.command:
+        argv: "{{ ['bash', '-c', render_source, ansible_playbook_python, render_dir ~ '/' ~ env.name ~ '.variables.sh'] + env_variables.keys() | list }}"
+      vars:
+        # Sources the file, then prints the named variables as JSON.
+        render_source: >-
+          set -eu; . "$1"; shift;
+          exec "$0" -c 'import json, os, sys; print(json.dumps({n: os.environ.get(n) for n in sys.argv[1:]}))' "$@"
+      environment:
+        PATH: /usr/bin:/bin
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.variables.sh"
+      register: render_sourced
+      changed_when: false
+
+    - name: Check each variable arrives intact
+      ansible.builtin.assert:
+        that:
+          - render_written.keys() | map('extract', item.stdout | from_json) | list == render_written.values() | map('string') | list
+        quiet: true
+      vars:
+        render_written: "{{ item.env.variables | default({}, true) }}"
+      loop: "{{ render_sourced.results }}"
+      loop_control:
+        label: "{{ item.env.name }}.variables.sh"
+
+    # What nucleated reads and reports: exactly these six keys, with these
+    # types, and counts rather than values.
+    - name: Write each environment's summary
+      ansible.builtin.copy:
+        content: "{{ env_setup_summary | to_nice_json }}\n"
+        dest: "{{ render_dir }}/{{ env.name }}.summary.json"
+        mode: "0600"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.summary.json"
+
+    - name: Check each summary
+      ansible.builtin.assert:
+        that:
+          - render_summary.keys() | sort == ['allowed_hosts', 'network', 'repos', 'secrets', 'setup_script', 'variables']
+          - render_summary.network == env_network
+          - render_summary.allowed_hosts is integer and render_summary.allowed_hosts is not boolean
+          - render_summary.allowed_hosts == (env_allowed_hosts | length if env_network == 'limited' else 0)
+          - render_summary.repos == repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | list
+          - render_summary.variables is integer and render_summary.variables is not boolean
+          - render_summary.variables == env_variables | length
+          - render_summary.secrets == 0 and render_summary.secrets is not boolean
+          - render_summary.setup_script is boolean
+          - render_summary.setup_script == (env.setup_script | default('', true) | length > 0)
+          - render_expected_summaries is not defined or render_summary == render_expected_summaries[env.name]
+        quiet: true
+      vars:
+        render_summary: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.summary.json') | from_json }}"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.summary.json"
+
+    - name: Check the setup-script unit
+      ansible.builtin.assert:
+        that:
+          - "'Type=oneshot' in render_unit"
+          - "'RemainAfterExit=yes' in render_unit"
+          - "'ExecStart=/usr/local/sbin/nucarium-env-setup %i' in render_unit"
+          - "('Environment=NUCLEUS_ROOT=' ~ nucleus_root) in render_unit"
+          - "'WantedBy=multi-user.target' in render_unit"
+          - render_unit | select('match', '(Requires|BindsTo|PartOf)=') | list | length == 0
+        quiet: true
+      vars:
+        render_unit: "{{ lookup('ansible.builtin.file', render_dir ~ '/nucarium-env-setup@.service').split('\n') }}"
 
     - name: Render the closing message
       ansible.builtin.copy:
