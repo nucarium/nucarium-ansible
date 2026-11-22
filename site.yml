@@ -144,6 +144,9 @@
     - role: env_setup
       become: true
       tags: env_setup
+    - role: env_runtime
+      become: true
+      tags: env_runtime
     - role: agent_servers
       become: true
       tags: agent_servers
