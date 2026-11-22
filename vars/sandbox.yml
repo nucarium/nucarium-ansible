@@ -1,0 +1,39 @@
+---
+# Where an agent's sandboxed commands may write, shared by the cloud_parity
+# role (which creates these folders, since a command cannot create a folder
+# where it may not write) and the claude role (which writes them into each
+# login's sandbox settings).
+#
+# An allowlist, so anything not named stays read-only: every dotfile in the
+# home (.bashrc, .gitconfig, .claude.json, .docker, .curlrc, .tmux.conf, ...),
+# ~/.local/bin, Claude Code's and nucleated's configuration, and Node under
+# ~/.local/share/fnm. Each of those is read by a program that runs outside
+# the sandbox, so a write there would let a command escape it. Add a folder
+# here only if nothing outside the sandbox runs code from it.
+#
+# Besides these, a session may write its own folder, the nucleus (the bare
+# repositories hold every session's git data), /tmp, /var/tmp and pnpm's lock
+# folders in the agent user's runtime folder.
+sandbox_agent_dirs:
+  - .cache
+  - .npm
+  - .local/share/pnpm
+  - .local/state
+  - go
+  - .cargo
+  - .rustup
+  - .m2
+  - .gradle
+  - .config/.wrangler
+
+# Read-only inside those folders: the ones on PATH and the configuration that
+# names programs to run. go/bin and .cargo/bin are on the agents' PATH, which
+# commands excluded from the sandbox (podman, docker) inherit, so a binary
+# written there could run unsandboxed. The nucleate download cache is
+# unpacked by the playbook.
+sandbox_agent_dirs_protected:
+  - go/bin
+  - .cargo/bin
+  - .cargo/config
+  - .cargo/config.toml
+  - .cache/nucarium

@@ -7,6 +7,9 @@
   gather_facts: false
   become: false
 
+  vars_files:
+    - vars/sandbox.yml
+
   vars:
     # The nucleus: bare clones in .repos/, sessions in .worktrees/, seed
     # files in .seeds/. nucleate manages it; nucleated watches it.

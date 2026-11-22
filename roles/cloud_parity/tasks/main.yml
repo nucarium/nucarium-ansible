@@ -165,6 +165,15 @@
     mode: u=rwX,go=rX
     recurse: true
 
+- name: Create the folders sandboxed commands may write
+  ansible.builtin.file:
+    path: "{{ agent_home }}/{{ item }}"
+    state: directory
+    owner: "{{ agent_user }}"
+    group: "{{ agent_user }}"
+    mode: "0755"
+  loop: "{{ sandbox_agent_dirs + ['go/bin'] }}"
+
 # pnpm keeps its locks in the user's runtime folder, which is new at every
 # boot. These folders are made at login so the sandbox can let agents write
 # them.
@@ -205,5 +214,5 @@
       export PLAYWRIGHT_BROWSERS_PATH={{ cloud_parity_pw_browsers }}
       export CHROME_PATH=/usr/bin/google-chrome
       export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
-      [ -d "$HOME/.cargo/bin" ] && export PATH="$HOME/.cargo/bin:$PATH"
+      [ -d "$HOME/.cargo/bin" ] && export PATH="$PATH:$HOME/.cargo/bin"
     mode: "0644"

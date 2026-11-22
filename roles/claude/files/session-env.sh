@@ -7,7 +7,8 @@ export GITHUB_TOKEN="$GH_TOKEN"
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export CHROME_PATH=/usr/bin/google-chrome
 export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
-export PATH="$HOME/.cargo/bin:$PATH"
+# Appended, and read-only to sandboxed commands (vars/sandbox.yml).
+export PATH="$PATH:$HOME/go/bin:$HOME/.cargo/bin"
 ENVEOF
 fi
 exit 0

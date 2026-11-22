@@ -13,6 +13,7 @@
     - ../roles/workspace/vars/main.yml
     - ../roles/claude/vars/main.yml
     - ../roles/day2/vars/main.yml
+    - ../vars/sandbox.yml
   vars:
     render_dir: "{{ playbook_dir }}/../out/render"
     agent_home: /home/{{ agent_user }}
@@ -106,22 +107,22 @@
         label: "{{ outer.0.name }}.{{ outer.1.dest }}"
 
     # The sandbox must be on, required, and offer no way around it: an agent
-    # whose sandbox fails must stop, not retry the command unconfined. As in a
-    # cloud session, agents may write anywhere in their home (the bare
-    # repositories included), the temp folders and pnpm's lock folders, and
-    # reach every host a cloud session reaches by default. Never the keys,
-    # tokens and start-up files, nor the bare repositories' hooks and config.
+    # whose sandbox fails must stop, not retry the command unconfined. Agents
+    # may write only the folders named in vars/sandbox.yml, the nucleus, the
+    # temp folders and pnpm's lock folders: never the home itself, its
+    # dotfiles, the folders on their PATH, nor the bare repositories' hooks
+    # and config. They reach every host a cloud session reaches by default.
     - name: Check each Claude Code settings file keeps commands in the sandbox
       ansible.builtin.assert:
         that:
           - render_sandbox.enabled is sameas true
           - render_sandbox.failIfUnavailable is sameas true
           - render_sandbox.allowUnsandboxedCommands is sameas false
-          - render_sandbox.filesystem.allowWrite == ['~', '/tmp', '/var/tmp'] + claude_pnpm_lock_dirs
+          - render_sandbox.filesystem.allowWrite == [nucleus_root] + (sandbox_agent_dirs | map('regex_replace', '^', '~/') | list) + ['/tmp', '/var/tmp'] + claude_pnpm_lock_dirs
+          - render_sandbox.filesystem.allowWrite | select('match', '^~/?$') | list | length == 0
+          - render_sandbox.filesystem.allowWrite | select('match', '^~/[.]?(bashrc|profile|gitconfig|npmrc|claude|claude[.]json|docker|ssh|local/bin|local/share/fnm|config)$') | list | length == 0
           - claude_pnpm_lock_dirs | select('match', '^/run/user/' ~ agent_uid ~ '/pnpm-') | list | length == 3
-          - claude_sandbox_protected | difference(render_sandbox.filesystem.denyWrite) | length == 0
-          - "['~/.ssh', '~/.claude', '~/.npmrc', '~/.gitconfig', '~/.bashrc', '~/.local/bin', '~/.config/nucleated'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
-          - environments | map(attribute='config_dir', default='') | select | difference(render_sandbox.filesystem.denyWrite) | length == 0
+          - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
           - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 2 * (repos | length)
           - render_sandbox.excludedCommands | sort == ['docker', 'podman']
           - "['api.anthropic.com', 'registry.npmjs.org', 'pypi.org', 'crates.io', 'proxy.golang.org', 'repo1.maven.org', 'registry-1.docker.io', 'archive.ubuntu.com', '*.githubusercontent.com'] | difference(render_sandbox.network.allowedDomains) | length == 0"

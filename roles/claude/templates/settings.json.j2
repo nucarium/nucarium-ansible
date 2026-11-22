@@ -8,7 +8,7 @@
     "excludedCommands": ["podman", "docker"],
     "filesystem": {
       "allowWrite": {{ claude_sandbox_allow_write | to_json }},
-      "denyWrite": {{ (claude_sandbox_protected + claude_sandbox_protected_logins + claude_sandbox_deny_write) | to_json }}
+      "denyWrite": {{ (claude_sandbox_deny_in_allowed + claude_sandbox_deny_write) | to_json }}
     },
     "network": {
       "allowedDomains": {{ (claude_cloud_allowed_domains + (sandbox_extra_allowed_domains | default([]))) | unique | to_json }}

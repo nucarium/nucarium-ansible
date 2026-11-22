@@ -43,14 +43,15 @@ read, but it has not been run end to end on real hardware.
   `/opt/node24`, Python with pip, uv, poetry, ruff, black, mypy and pytest,
   Rust, Java 21 with Maven and Gradle, clang, cmake, ninja and conan,
   `docker` and `docker compose` (on Podman), PostgreSQL and Redis (installed,
-  not started), yq, tmux, vim and nano. Commands may write anywhere in the
-  agent's home (the bare repositories in `~/workspace/.repos/` included),
-  `/tmp`, `/var/tmp` and pnpm's lock folders, and reach every host a cloud
-  session reaches by default, plus `sandbox_extra_allowed_domains`. What
-  stays read-only: the keys and tokens, Claude Code's own configuration,
-  the shell start-up files, the global git configuration, everything under
-  `~/.local/bin` and the systemd and `nucleated` configuration, and each bare
-  repository's `hooks/` and `config`, because a change to any of them would
+  not started), yq, tmux, vim and nano. They reach every host a cloud
+  session reaches by default, plus `sandbox_extra_allowed_domains`.
+  Commands may write only where `vars/sandbox.yml` says: the nucleus (the
+  bare repositories in `~/workspace/.repos/` included), the package and
+  build caches (`~/.cache`, `~/.npm`, pnpm's store and lock folders, `~/go`,
+  `~/.cargo`, `~/.rustup`, `~/.m2`, `~/.gradle`), `/tmp` and `/var/tmp`.
+  Everything else in the home stays read-only, every dotfile included, and so
+  do `~/go/bin`, `~/.cargo/bin` and each bare repository's `hooks/` and
+  `config`, because a change to any of them would
   reach a program that runs outside the sandbox. Two things still differ
   from a cloud session: agents are not root, so they cannot install system
   packages or start PostgreSQL and Redis themselves, and the box runs the

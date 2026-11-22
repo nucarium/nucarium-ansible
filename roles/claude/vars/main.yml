@@ -26,48 +26,19 @@ claude_sandbox_deny_write: >-
   {{ repos | map('basename') | product(['hooks', 'config']) | map('join', '.git/')
   | map('regex_replace', '^', nucleus_root ~ '/.repos/') | list }}
 
-# Where sandboxed commands may write besides the session folder: everything a
-# cloud session's commands may write that the agent user owns. The agent's
-# home, the temp folders and pnpm's lock folders in the agent user's runtime
-# folder (made at login by the cloud_parity role).
+# Where sandboxed commands may write besides the session folder: the nucleus,
+# the agent folders in vars/sandbox.yml, the temp folders and pnpm's lock
+# folders in the agent user's runtime folder (made at login by the
+# cloud_parity role). Nothing else in the home is writable.
 claude_pnpm_lock_dirs:
   - /run/user/{{ agent_uid }}/pnpm-dir-locks-{{ agent_uid }}
   - /run/user/{{ agent_uid }}/pnpm-modules-swaps-{{ agent_uid }}
   - /run/user/{{ agent_uid }}/pnpm-store-operation-locks-{{ agent_uid }}
-claude_sandbox_allow_write: "{{ ['~', '/tmp', '/var/tmp'] + claude_pnpm_lock_dirs }}"
-
-# What stays read-only inside the home: the keys and tokens, Claude Code's own
-# configuration, and everything that runs outside the sandbox or at login.
-# A change to any of these would reach a program that is not sandboxed: the
-# agent server, nucleated, the session hooks, the next login, or git run by
-# nucleated (the global config can name programs for git to run).
-claude_sandbox_protected:
-  - ~/.ssh
-  - ~/.claude
-  - ~/.npmrc
-  - ~/.gitconfig
-  - ~/.config/git
-  - ~/.terraformrc
-  - ~/.terraform.d
-  - ~/.bashrc
-  - ~/.bash_profile
-  - ~/.bash_login
-  - ~/.bash_logout
-  - ~/.profile
-  - ~/.local/bin
-  - ~/.local/share/claude
-  - ~/.local/share/systemd
-  - ~/.config/systemd
-  - ~/.config/environment.d
-  - ~/.config/user-tmpfiles.d
-  - ~/.config/agent-servers
-  - ~/.config/nucleate
-  - ~/.config/nucleated
-  - ~/.config/containers
-
-# A second login's configuration folder is protected like ~/.claude.
-claude_sandbox_protected_logins: >-
-  {{ environments | map(attribute='config_dir', default='') | select | list }}
+claude_sandbox_allow_write: >-
+  {{ [nucleus_root] + (sandbox_agent_dirs | map('regex_replace', '^', '~/') | list)
+  + ['/tmp', '/var/tmp'] + claude_pnpm_lock_dirs }}
+claude_sandbox_deny_in_allowed: >-
+  {{ sandbox_agent_dirs_protected | map('regex_replace', '^', '~/') | list }}
 
 # The network a cloud session allows by default ("Limited", with package
 # managers allowed), from Claude Code's documentation of cloud environments,
