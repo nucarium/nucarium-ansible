@@ -1,12 +1,17 @@
 [Unit]
 Description=Agent server %i: Claude Code Remote Control over the nucleus (tmux)
 Documentation=https://nucarium.dev
+# The environment's agent server in its container, when it has one: never
+# both at once (agent-server-runtime says which runs).
+Conflicts=agent-env-%i.service
 
 [Service]
 Type=forking
 Slice=agents.slice
 # Capacity, session-name prefix and, for a second login, CLAUDE_CONFIG_DIR.
 EnvironmentFile=%h/.config/agent-servers/%i.env
+# Only while the environment runs on the host.
+ExecCondition={{ nucarium_lib_dir }}/agent-server-runtime is %i host
 # Its own tmux server, so this unit is active exactly while the server runs,
 # which is how nucleated tells that it is alive. tmux runs the server itself
 # in a scope of its own, beside this unit. Look at it with:
@@ -15,6 +20,8 @@ ExecStart=/usr/bin/tmux -L agent-%i new-session -d -s %i %h/.local/bin/agent-ser
 # Waits until the server has really gone (see the script), and succeeds when
 # it already has.
 ExecStop=%h/.local/bin/agent-server-stop %i
+# When the environment has moved into its container, that one starts now.
+ExecStopPost={{ nucarium_lib_dir }}/agent-server-runtime hand-over %i host
 Restart=always
 RestartSec=15
 # When the memory cap stops one session, the others carry on.

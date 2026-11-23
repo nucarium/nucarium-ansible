@@ -1,0 +1,7 @@
+# What nucleated's hook reads in a container environment (NUCLEATED_CONFIG),
+# where HOME is /root: the environments, so that a hook finds its own by
+# --env, and the state folder, whose spool is mounted at the same path. No
+# token, and nothing the daemon reads. Written by the Nucarium box recipe
+# from group_vars/all.yml; the next run rewrites this file.
+state_dir = "{{ nucarium_nucleated_state_dir }}"
+{% include 'nucleated-environments.toml.j2' %}

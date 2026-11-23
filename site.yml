@@ -9,6 +9,7 @@
 
   vars_files:
     - vars/sandbox.yml
+    - vars/runtime.yml
 
   vars:
     # The nucleus: bare clones in .repos/, sessions in .worktrees/, seed
@@ -29,6 +30,11 @@
     env_allowed_hosts: "{{ env.allowed_hosts | default([], true) }}"
     env_variables: "{{ env.variables | default({}, true) }}"
     env_setup_script: "{{ env.setup_script | default('', true) }}"
+    # The unit that runs its agent server: on the host, or in its container.
+    env_unit: "{{ 'agent-env-' ~ env.name ~ '.service' if env_runtime == 'container' else 'agent-server@' ~ env.name ~ '.service' }}"
+    # Its nucleus: the shared one on the host; in a container, its own, which
+    # is all its container mounts of the agent user's workspace.
+    env_nucleus: "{{ agent_home ~ '/workspace-' ~ env.name if env_runtime == 'container' else nucleus_root }}"
     # Nucarium Watch is hosted only, so its address is not a setting.
     watch_console_url: https://app.nucarium.com
     # What box_notify_url may be: https, or http to the box itself, with no
@@ -92,6 +98,11 @@
       ansible.builtin.import_tasks: tasks/agent-user.yml
       tags: always
 
+    - name: Check the logins of container environments
+      ansible.builtin.import_tasks: tasks/check-container-logins.yml
+      when: agent_home is defined
+      tags: always
+
   roles:
     - role: base
       become: true
@@ -124,6 +135,12 @@
     - role: workspace
       become: true
       tags: workspace
+    # Before env_setup: a container environment's setup script is built into
+    # its image, on its network, from its base, and env_setup starts that
+    # build when any of them has changed.
+    - role: env_runtime
+      become: true
+      tags: env_runtime
     - role: env_setup
       become: true
       tags: env_setup

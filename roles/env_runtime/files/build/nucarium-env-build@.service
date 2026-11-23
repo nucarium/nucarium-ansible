@@ -1,0 +1,18 @@
+# Written by the Nucarium box recipe (the env_runtime role). Builds the image
+# of container environment %i. Started by nucarium-env-setup@%i.service,
+# root's, which records how the build went; see nucarium-env-build.
+[Unit]
+Description=Image of environment %i: its setup script on its base image
+Documentation=https://nucarium.dev
+# The build reaches the network through the environment's proxy only.
+Wants=nucarium-proxy-%i.service
+After=nucarium-proxy-%i.service
+
+[Service]
+Type=oneshot
+# Inside the agent servers' memory cap.
+Slice=agents.slice
+ExecStart=%h/.local/bin/nucarium-env-build build %i
+# The script's own limit is 30 minutes; this backs it up, with time to save
+# the image.
+TimeoutStartSec=40min

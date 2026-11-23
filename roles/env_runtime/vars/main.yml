@@ -1,7 +1,7 @@
 ---
 # The environments that run in a container (runtime: container). With none,
 # the role does nothing.
-env_runtime_container_envs: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | map(attribute='name') | list }}"
+env_runtime_container_envs: "{{ nucarium_container_envs }}"
 
 # The base image every container environment's image is built from, in the
 # agent user's Podman.

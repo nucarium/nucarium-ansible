@@ -191,9 +191,7 @@
         - name: tag.gpgsign
           value: "true"
         - name: credential.https://github.com.helper
-          value: >-
-            !f() { [ "$1" = get ] && printf "username=x-access-token\npassword=%s\n"
-            "$(cat /run/agent-tokens/github)"; }; f
+          value: "{{ nucarium_git_credential_helper }}"
       loop_control:
         label: "{{ item.name }}"
 

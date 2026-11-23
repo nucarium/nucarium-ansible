@@ -23,5 +23,8 @@ ExecStart=/usr/bin/restic backup \
   {{ agent_home }}/.local/bin \
   {{ nucleus_root }}/.seeds \
   {{ nucleus_root }}/.claude \
+{% for name in nucarium_container_envs %}
+  {{ agent_home }}/workspace-{{ name }}/.seeds \
+{% endfor %}
   /etc/nut /etc/systemd/system /usr/local/sbin
 ExecStartPost=/usr/bin/restic forget --keep-daily 7 --keep-weekly 8 --prune

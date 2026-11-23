@@ -72,6 +72,26 @@
         dest: "{{ day2_nucleated_config_file }}"
         mode: "0600"
 
+    # Read by the hook inside container environments, which have no access
+    # to the daemon's own folder and its tokens. A folder of its own,
+    # mounted read-only, so that a rewritten file is seen there. It holds no
+    # secret, and is left in place when no environment is in a container
+    # any more: one may still be running until it stops by itself.
+    - name: Write the hook's configuration for container environments
+      when: nucarium_container_envs | length > 0
+      block:
+        - name: Create the hook's configuration folder
+          ansible.builtin.file:
+            path: "{{ nucarium_nucleated_hook_dir }}"
+            state: directory
+            mode: "0755"
+
+        - name: Write the hook's configuration from the settings
+          ansible.builtin.template:
+            src: nucleated-hook-config.toml.j2
+            dest: "{{ nucarium_nucleated_hook_dir }}/config.toml"
+            mode: "0644"
+
     # A token nothing uses is a secret with no purpose: it goes when the
     # address or its reference is emptied.
     - name: Remove the notifier's token when it is not in use

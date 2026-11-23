@@ -5,15 +5,23 @@ The box is built. What is left needs you in person:
      ssh {{ agent_user }}@{{ inventory_hostname }} cat .ssh/id_ed25519_signing.pub > {{ inventory_hostname }}-signing.pub
      gh ssh-key add {{ inventory_hostname }}-signing.pub --type signing --title "{{ inventory_hostname }} agent signing"
 
-2. Sign each agent server in to Claude and start it once by hand, as {{ agent_user }} on the box. The first start asks questions a service cannot answer: answer y to trust the folder and to enable Remote Control, wait until it says it is connected, press Ctrl+C, then hand over to the service.
+2. Sign each agent server in to Claude and start it once by hand, as {{ agent_user }} on the box. The first start asks questions a service cannot answer: answer y to trust the folder and to enable Remote Control, wait until it says it is connected, press Ctrl+C, then hand over to the service. An environment in a container is started first and waits, inside its container, until it is signed in; then its server asks to enable Remote Control in its tmux session (leave with Ctrl+B then D).
 {% for server in environments %}
 {% set dir = server.config_dir | default(agent_home ~ '/.claude') %}
 {% set env = 'CLAUDE_CONFIG_DIR=' ~ dir ~ ' ' if dir != agent_home ~ '/.claude' else '' %}
-   {{ server.name }}:
+   {{ server.name }}{{ ' (in its container)' if server.runtime | default('host', true) == 'container' else '' }}:
+{% if server.runtime | default('host', true) == 'container' %}
+     systemctl --user start agent-env-{{ server.name }}.service
+     podman exec -it agent-env-{{ server.name }} claude
+       (sign in, trust the folder, run /mcp and authorise each connector that asks, then /exit)
+     podman exec -it agent-env-{{ server.name }} tmux -L agent-{{ server.name }} attach
+       (answer y to enable Remote Control, wait until it says it is connected, then Ctrl+B then D)
+{% else %}
      {{ env }}claude
        (sign in, run /mcp and authorise each connector that asks, then /exit)
      cd {{ nucleus_root }} && {{ env }}claude remote-control --spawn worktree --no-create-session-in-dir --no-chrome
      systemctl --user start agent-server@{{ server.name }}.service
+{% endif %}
 {% endfor %}
 
 {% set whoami = day2_watch_whoami | default({}) %}

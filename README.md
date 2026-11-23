@@ -35,6 +35,16 @@ read, but it has not been run end to end on real hardware.
   (a Claude login), each a systemd user service that waits for the network
   and restarts itself.
   Every command an agent runs is confined by Claude Code's sandbox.
+- **Environments in containers, if you want them.** An environment with
+  `runtime: container` runs its server and sessions in a rootless Podman
+  container of its own, as root on Ubuntu 24.04 with a cloud session's
+  tools, as a hosted session does: its setup script is built into its
+  image, its network goes through a proxy of its own, and what one installs
+  or starts cannot clash with another's. It has a nucleus of its own,
+  `~agent/workspace-<name>`, with its own clones of the repositories, so
+  nothing its sessions write reaches another environment's; its files are
+  the agent user's on the box, and its server shows in the
+  Claude app under the environment's name.
 - **Environments set up like a cloud environment.** Each environment can
   have its own network access (none, limited or full), more hosts,
   environment variables and a setup script, which runs as root before its
@@ -67,7 +77,8 @@ read, but it has not been run end to end on real hardware.
   reach a program that runs outside the sandbox. Two things still differ
   from a cloud session: agents are not root, so they cannot install system
   packages or start PostgreSQL and Redis themselves, and the box runs the
-  Ubuntu release it was installed with.
+  Ubuntu release it was installed with. In a container environment neither
+  is so: agents are root on Ubuntu 24.04, as in a cloud session.
 - **`nucleated`, the box daemon.** One service that sends a heartbeat, records
   when a session starts, works, needs you, stops or fails, fetches the
   repositories, removes finished sessions, and saves uncommitted work to a
@@ -159,12 +170,12 @@ Roles run in this order. Each has a tag of the same name.
 | `toolchain` | GitHub CLI, Terraform if used, Go, Node, pnpm, the commit-signing key and Git identity |
 | `cloud_parity` | What a Claude Code cloud session has: Playwright's Chromium (for `playwright_version`) and its system libraries in `/opt/pw-browsers`, Chrome for Testing, Node under `/opt`, the Python tools, Rust, Java with Maven and Gradle, the C/C++ tools, `docker` on Podman, PostgreSQL and Redis, the cloud session's variables for login shells, and pnpm's lock folders at every login |
 | `broker` | The GitHub App key and the timer that mints a fresh GitHub token every 20 minutes; the HCP Terraform token if used |
-| `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, the paths it may write, and the hosts its environment's `network` allows), update channel, deny rules, the session hook (GitHub token and the environment's variables) and the `nucleated hook` entries. Also your `agent-context/` files |
-| `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server |
-| `env_setup` | Each environment's variables and setup script, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which runs the script at boot and whenever it changes, records how it went in `/var/lib/nucarium/environments/<name>.setup.json`, and never restarts an agent server. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
-| `env_runtime` | For environments with `runtime: container` (being built), their base image: Ubuntu 24.04 with what a Claude Code cloud session has, for root, built by the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and the pins in `group_vars/all.yml` as `localhost/nucarium-base:<hash>`, and tagged `:current`. Built again only when the Containerfile or a pin changes. Does nothing on a box with no such environment |
-| `agent_servers` | One `agent-server@<name>.service` per entry in `environments`, under one shared memory cap, each waiting while its environment's setup script runs. Enabled, not started |
-| `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token. Also the two jobs the daemon does not own: a weekly cleanup of container images, the pnpm store and the journal, and the nightly encrypted backup if configured |
+| `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, the paths it may write, and the hosts its environment's `network` allows; off in a container, which is the boundary there), update channel, deny rules, the session hook (GitHub token and the environment's variables, root's, in `/usr/local/lib/nucarium/session-env.sh`) and the `nucleated hook` entries. Also your `agent-context/` files |
+| `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server for each login on the host. For each container environment, its own nucleus, `~/workspace-<name>`, made and cloned on the host only while it is new, with its `.claude/`, `AGENTS.md`, `CLAUDE.md` and `.mcp.json` |
+| `env_runtime` | For environments with `runtime: container`: their base image, Ubuntu 24.04 with what a Claude Code cloud session has, for root, built by the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and the pins in `group_vars/all.yml` as `localhost/nucarium-base:<hash>`, and tagged `:current`, built again only when the Containerfile or a pin changes; each one's two networks and its proxy; the builder of their images (`nucarium-env-build`, with the agent user's units `nucarium-env-build@<name>` and `nucarium-env-check@<name>`); and the box's Git identity, signing key and packages token as the containers see them, root's, in `/etc/nucarium/box/`. Does nothing on a box with no such environment. Runs before `env_setup` |
+| `env_setup` | Each environment's variables, setup script and runtime, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which records how the script went in `/var/lib/nucarium/environments/<name>.setup.json` and never restarts an agent server. On the host it runs the script at boot and whenever it changes. In a container it builds the environment's image, `localhost/nucarium-env-<name>`, from its base image and script, on its network, whenever one of them, the variables or the network changes, and at boot does nothing when the image is up to date. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
+| `agent_servers` | One agent server per entry in `environments`, under one shared memory cap: on the host `agent-server@<name>.service`, which waits while its environment's setup script runs; in a container `agent-env-<name>.service`, a quadlet unit, root's, that starts the environment's image with its own nucleus and the box's tools mounted, and never the shared nucleus. Only the unit of an environment's `runtime` is enabled, the two never run at once, and a switch takes effect when the running one stops by itself. Enabled, not started |
+| `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token, the configuration its hook reads inside a container (`~/.config/nucleated-hook/`, no token), and, with a container environment, its check of each repository's git config enforced. Also the two jobs the daemon does not own: a weekly cleanup of container images (the environments' old image tags included), the pnpm store and the journal, and the nightly encrypted backup if configured |
 
 ## Reporting to Nucarium Watch
 
@@ -236,7 +247,7 @@ The playbook prints these, filled in for your box, when it finishes.
 | Hardware, BIOS settings, booting the installer, typing the disk passphrase once | They happen at the box, before there is anything to connect to. |
 | Registering the agents' signing key on GitHub | It uses your own GitHub sign-in, which never goes on the box. |
 | Signing each agent server in to Claude, and authorising connectors with `/mcp` | Each is a sign-in in your browser. |
-| Starting each agent server once by hand | The first start asks whether to trust the folder and to enable Remote Control, and waits for you to answer in a terminal. |
+| Starting each agent server once by hand | The first start asks whether to trust the folder and to enable Remote Control, and waits for you to answer in a terminal. In a container the same two answers are given inside it, with `podman exec`. |
 | `nucleate login`, unless you gave a token | Approving a box is your decision, made in the Watch console. |
 | Attaching the disk-header backup to the passphrase in your password manager, then deleting it | The file must end up somewhere only you can reach. |
 | The power-cut test | Someone has to pull the plug. |
@@ -262,24 +273,28 @@ what a real run would do.
 |---|---|---|
 | Make another repository available | `repos` (and the GitHub App's selected repositories) | `--tags workspace` |
 | Allow agents another website | `sandbox_extra_allowed_domains` | `--tags claude` |
-| Change what one environment's sessions can reach | `network` or `allowed_hosts` in `environments` | `--tags claude,env_setup`; new sessions see it |
-| Set an environment's variables | `variables` in `environments` | `--tags env_setup`; new sessions see them |
-| Add or change an environment's setup script | `setup_script` in `environments` | `--tags env_setup`; the script runs at once, and no agent server is restarted |
+| Change what one environment's sessions can reach | `network` or `allowed_hosts` in `environments` | `--tags claude,env_setup`; new sessions see it. In a container, `--tags env_runtime,env_setup`: its proxy applies it at once, and its image is built again |
+| Set an environment's variables | `variables` in `environments` | `--tags env_setup`; new sessions see them. In a container its image is built again too |
+| Add or change an environment's setup script | `setup_script` in `environments` | `--tags env_setup`; the script runs at once, and no agent server is restarted. In a container, `--tags env_runtime,env_setup`: the image is built again, and the server takes it up at its next start |
 | Follow a repository to another Playwright | `playwright_version` | `--tags cloud_parity`, and `env_runtime` too if an environment runs in a container |
-| Build the base image of container environments | `runtime: container` on an environment (being built: for now only the image is built, and the environment still runs on the host) | `--tags env_runtime`; the first build takes a while, and no agent server is touched |
+| Run an environment in its own container, or back on the host | `runtime` on the environment (a container one needs its own `config_dir`) | `--tags env_runtime,env_setup,claude,workspace,agent_servers,day2`. The first build of the base image takes a while. The switch takes effect when the running server stops by itself, or when you restart it; never while a session runs. The first time, sign it in by hand (the closing message says how) |
 | Add a second Claude login | `environments` | `--tags claude,workspace,env_setup,agent_servers,day2`, then sign it in and start it by hand |
 | Change an environment's capacity or the memory cap | `environments`, `agents_memory_*` | `--tags agent_servers`, then restart that server |
 | Upgrade `nucleate` and `nucleated` | `nucleate_version` and `nucleate_sha256` | `--tags workspace` |
 | Turn Watch on or off, or rotate its token | `watch_target`, the 1Password item | `--tags day2` |
 | Set, change or remove the box's own notifier | `box_notify_url`, the 1Password item | `--tags day2` |
-| Renew the packages token | the 1Password item | `--tags toolchain` |
+| Renew the packages token | the 1Password item | `--tags toolchain`, and `env_runtime` too if an environment runs in a container |
 
 The playbook never restarts an agent server, because that ends its sessions.
 Do it yourself at a quiet moment, as `agent` on the box:
 
 ```bash
 systemctl --user restart agent-server@main.service
+systemctl --user restart agent-env-main.service   # an environment in a container
 ```
+
+Restart the unit of the environment's runtime only: starting the other one
+stops this one, sessions included.
 
 `nucleated` picks up a changed configuration or a new token by itself.
 
@@ -297,11 +312,21 @@ journalctl --user -u nucleated -n 50
 cat /var/lib/nucarium/environments/main.setup.json   # the setup script's last run
 ```
 
+In a container environment, as `agent`:
+
+```bash
+systemctl --user status agent-env-main.service
+podman exec -it agent-env-main tmux -L agent-main attach   # the server's own output
+podman exec -it agent-env-main bash                        # a shell where its sessions run
+journalctl --user -u nucarium-env-build@main               # the setup script, as built into the image
+podman images localhost/nucarium-env-main                  # its images; :current is the one in use
+```
+
 As yourself, for the setup script's output:
 
 ```bash
 sudo journalctl -u nucarium-env-setup@main.service
-sudo systemctl restart nucarium-env-setup@main.service   # run it again
+sudo systemctl restart nucarium-env-setup@main.service   # run it again (in a container: build if anything changed)
 ```
 
 ## Optional: `agent-context/`
@@ -389,14 +414,25 @@ Choices this recipe makes where the product leaves room:
   or stops a server.
 - **Hooks name their environment.** Each login's `settings.json` registers
   `nucleated hook <event> --env <name>`, so a session is always counted under
-  the login that ran it, even though every environment shares one nucleus.
+  the login that ran it, even though every environment on the host shares
+  one nucleus.
 - **The token is stored only when needed.** `nucleate whoami` decides: a box
   that is signed in with a token Watch accepts is left alone.
 - **Agents push with `git push origin HEAD`.** A bare repository's `config`
   is read-only to them, because `nucleated` runs git there outside the
   sandbox and a setting such as `core.fsmonitor` or `core.sshCommand` would
   run a command unconfined. So `git push -u` pushes but cannot record the
-  upstream. Say so in your `agent-context/` files.
+  upstream. Say so in your `agent-context/` files. In a container
+  environment, which has a nucleus of its own, `config` is writable and
+  `hooks/` read-only, and `nucleate` and `nucleated` rely on their own check
+  of each repository's config, and run git with no hooks, from
+  `nucleate_minimum_for_containers` on.
+- **A container environment's server is held the same way.** Its container's
+  main process starts the server in a tmux session and lasts as long as it,
+  so `agent-env-<name>.service` too is active exactly while the server runs.
+  Its server runs in `/etc/nucarium/servers/<name>/`, which holds only the
+  worktree hooks, because Claude Code names a Remote Control server after its
+  folder: each environment then shows under its own name in the Claude app.
 - **The weekly disk cleanup stays outside the daemon.** `nucleated` cleans up
   sessions; container images, the pnpm store and the journal are pruned by
   `agent-gc.timer`.

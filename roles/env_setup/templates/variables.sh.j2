@@ -1,7 +1,7 @@
 # Environment {{ env.name }}'s variables, from environments in
 # group_vars/all.yml. Written by the Nucarium box recipe; the next run
-# rewrites this file. ~agent/.claude/hooks/session-env.sh adds them to every
-# new session of the environment.
+# rewrites this file. {{ nucarium_lib_dir }}/session-env.sh adds them to
+# every new session of the environment.
 {% for name, value in env_variables.items() %}
 export {{ name }}={{ value | quote }}
 {% endfor %}

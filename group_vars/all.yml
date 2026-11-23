@@ -84,7 +84,8 @@ github_app_installation_id: "12345678"
 # organisation belongs on its own box.
 #
 #   name        A short label: lower-case letters, digits and hyphens. It
-#               names the service (agent-server@<name>), prefixes session
+#               names the service (agent-server@<name>, or agent-env-<name>
+#               in a container), prefixes session
 #               names (<box>-<name>-…), and names the environment in Watch.
 #   config_dir  The full path of the folder that holds this login's Claude
 #               configuration. Left out, it is ~/.claude in the agent user's
@@ -93,12 +94,39 @@ github_app_installation_id: "12345678"
 #   capacity    The most sessions this environment runs at once. Left out,
 #               it is 12, which suits 64 GB.
 #   runtime     host or container. Left out, it is host: the agent server
-#               and its sessions run on the box as the agent user, as
-#               described here. container is being built: for now it only
-#               builds the environments' base image (Ubuntu 24.04 with a
-#               cloud session's tools, localhost/nucarium-base in the agent
-#               user's Podman), and the environment still runs on the host.
-#               Setting it needs `--tags env_runtime`.
+#               and its sessions run on the box as the agent user, in
+#               Claude Code's sandbox, as described here. container runs
+#               them in a rootless Podman container of the environment's own
+#               (agent-env-<name>, the agent user's), as root, on Ubuntu
+#               24.04 with a cloud session's tools: its setup script is
+#               built into the image, its network is enforced by a proxy of
+#               its own, and nothing it installs or starts reaches the box or
+#               another environment. It has a nucleus of its own,
+#               ~agent/workspace-<name>, with its own clones of repos, its
+#               own sessions and its own AGENTS.md, and shares only the
+#               GitHub App and Claude Code with the box. It needs a config_dir of its
+#               own, directly in the agent user's home and named
+#               .claude-<something> (/home/agent/.claude-<name>): the
+#               container can write that login, so once it has been a
+#               container's the playbook refuses it on the host, and moving
+#               the environment back needs a new config_dir and a new
+#               sign-in. It also needs nucleate_version at
+#               nucleate_minimum_for_containers (vars/runtime.yml) or later:
+#               a container can write its bare repositories' config, and
+#               from that release nucleate and nucleated, which run git there
+#               on the host, check the config and run no hook first; the
+#               recipe enforces the check. Its nucleus's .claude, .seeds,
+#               .mcp.json, AGENTS.md, CLAUDE.md and each repository's hooks
+#               are read-only in it. The playbook clones into its nucleus
+#               only while it is new; a repository added to repos later is
+#               cloned by its agent server, inside the container, at its next
+#               start.
+#               Changing it takes effect when the environment's agent server
+#               next stops by itself (after about ten minutes with no
+#               session), never mid-session; it needs
+#               `--tags env_runtime,env_setup,claude,workspace,agent_servers,day2`.
+#               A container's first start needs two answers by hand, as on
+#               the host; the closing message of the playbook lists them.
 #
 # Each environment can also have what a Claude Code cloud environment has,
 # set here on the box and shown, read-only, in Watch:
@@ -107,10 +135,12 @@ github_app_installation_id: "12345678"
 #                  or full (any host). Left out, it is limited: the hosts a
 #                  cloud session reaches by default (package registries,
 #                  GitHub, cloud SDKs) plus sandbox_extra_allowed_domains.
-#                  It governs the commands agents run in the sandbox. Claude
-#                  Code's own WebFetch tool is not one of them: even with
-#                  none, it can still fetch a page once a permission prompt
-#                  is approved.
+#                  On the host it governs the commands agents run in the
+#                  sandbox. Claude Code's own WebFetch tool is not one of
+#                  them: even with none, it can still fetch a page once a
+#                  permission prompt is approved. In a container it governs
+#                  everything in it, through the environment's proxy;
+#                  Claude Code's own hosts are always reachable.
 #   allowed_hosts  More hosts for limited, one per line, on top of that
 #                  list. A leading *. matches every subdomain.
 #   variables      NAME: value lines, set in every new session of the
@@ -127,6 +157,15 @@ github_app_installation_id: "12345678"
 #                  It must be safe to run more than once. The nucleus's
 #                  path is in $NUCLEUS_ROOT; the agent can write there, so do
 #                  anything inside it as the agent (runuser -u agent -- ...).
+#                  In a container it runs once, when the image is built
+#                  (when the script, the variables, the network or the base
+#                  image change), as a cloud environment's does: with the
+#                  environment's variables and network, and without the
+#                  nucleus. What it writes, /root included, is in every
+#                  session; what it starts is not running, so a session
+#                  starts its own services. Its output is in the agent
+#                  user's journal (journalctl --user -u
+#                  nucarium-env-build@<name>).
 #
 # Ansible reads {{, {% and {# in a value as a template, and a script often
 # has them: ${#list[@]}, or docker ps --format '{{.Names}}'. Write !unsafe
@@ -134,8 +173,10 @@ github_app_installation_id: "12345678"
 # the same before a variable's value that has them, NAME: !unsafe '{{.Names}}'.
 # Without it the playbook stops and names the environment and the key.
 #
-# Changing any of these needs `--tags claude,env_setup`; new sessions see
-# the change. For example:
+# Changing any of these needs `--tags claude,env_setup`, and
+# `env_runtime,env_setup` for a container environment, whose image is then
+# built again; new sessions see the change (in a container, from its next
+# start). For example:
 #
 #   - name: main
 #     network: limited

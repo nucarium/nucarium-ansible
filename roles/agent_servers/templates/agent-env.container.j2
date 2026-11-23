@@ -1,0 +1,131 @@
+# Agent server {{ env.name }}, in the environment's own container. Written by
+# the Nucarium box recipe from environments in group_vars/all.yml; the next
+# run rewrites this file. A change takes effect at the container's next
+# start, never by restarting it: that would end its sessions.
+#
+# Quadlet makes it the agent user's unit agent-env-{{ env.name }}.service.
+# Look at the server with:
+#   podman exec -it agent-env-{{ env.name }} tmux -L agent-{{ env.name }} attach
+[Unit]
+Description=Agent server {{ env.name }}: Claude Code Remote Control in the environment's container
+Documentation=https://nucarium.dev
+# The environment's agent server on the host: never both at once
+# (agent-server-runtime says which runs).
+Conflicts=agent-server@{{ env.name }}.service
+# Its one way out.
+Wants=nucarium-proxy-{{ env.name }}.service
+After=nucarium-proxy-{{ env.name }}.service
+# With no image, a few tries and then it waits to be started:
+# nucarium-env-setup@{{ env.name }} starts it once there is one.
+StartLimitIntervalSec=10min
+StartLimitBurst=5
+
+[Container]
+ContainerName=agent-env-{{ env.name }}
+# Built on the box by nucarium-env-setup@{{ env.name }}; never pulled.
+Image=localhost/nucarium-env-{{ env.name }}:current
+Pull=never
+# The box's name, which the Claude app shows beside the server's.
+HostName={{ inventory_hostname }}
+# An init as process 1, so a session's orphans are reaped.
+RunInit=true
+# The environment's own network, whose one way out is its proxy.
+Network={{ env_runtime_network }}.network
+{% for name, value in env_runtime_proxy_env.items() %}
+Environment={{ name }}={{ value }}
+{% endfor %}
+# Root, as in a cloud session; the agent user on the host.
+Environment=HOME=/root
+Environment=PATH={{ nucarium_image_path }}
+Environment=CLAUDE_CONFIG_DIR={{ env_config_dir }}
+# Claude Code is the box's, mounted read-only, and updated on the host.
+Environment=DISABLE_AUTOUPDATER=1
+# nucleate's configuration for this environment's own nucleus (env_setup).
+Environment=NUCLEATE_CONFIG=/etc/nucarium/environments/{{ env.name }}/nucleate.toml
+Environment=NUCLEATED_CONFIG={{ nucarium_nucleated_hook_dir }}/config.toml
+Environment=NPM_CONFIG_GLOBALCONFIG={{ nucarium_box_dir }}/npmrc
+Environment=AGENT_SERVER_RUNTIME=container
+Environment=AGENT_SERVER_NAME={{ env.name }}
+Environment=AGENT_SERVER_ROOT={{ nucarium_servers_dir }}/{{ env.name }}
+Environment=AGENT_SERVER_CAPACITY={{ env.capacity | default(12) }}
+Environment=AGENT_SERVER_PREFIX={{ inventory_hostname }}-{{ env.name }}
+Environment=AGENT_SERVER_COMMAND={{ agent_home }}/.local/bin/agent-server
+# The repositories its nucleus offers; the server clones any it lacks.
+Environment=AGENT_SERVER_REPOS=/etc/nucarium/environments/{{ env.name }}/repos
+Environment=AGENT_SERVER_NUCLEUS={{ env_nucleus }}
+# Every path at the same place as on the host, so that the worktrees' git
+# pointers, nucleated's view of them, the hooks' environment matching and
+# the transcripts' folders agree. Folders, never single files, for anything the host replaces.
+# Nothing over /root, where the setup script's files are.
+#
+# The environment's own nucleus (env_nucleus, the workspace role makes it),
+# read-write; never the nucleus the host's environments share, so nothing a
+# session here writes reaches their sessions or what their agent servers
+# read. Read-only on top of it what its sessions read as instructions or run
+# as hooks (nucarium_nucleus_protected): .claude, .mcp.json, AGENTS.md,
+# CLAUDE.md and the seed files. agent-env-start refuses to start the
+# container when one is missing or a link. Each bare repository's hooks are
+# read-only too (agent-env-start lists them as they are at the container's
+# start; one cloned while it runs has writable hooks until the next). A
+# repository's config stays writable, as nucleate hook-create records
+# branches there: nucleated, which runs git in this nucleus on the host, and
+# nucleate, from nucleate_minimum_for_containers (which the playbook
+# requires), check it before they run git there, and run git with
+# core.hooksPath=/dev/null.
+Volume={{ env_nucleus }}:{{ env_nucleus }}
+# The repositories and the sessions' folders, writable, each its own mount so
+# that nothing in the container can swap them for a link to elsewhere on the
+# box, which nucleated on the host would follow.
+Volume={{ env_nucleus }}/.repos:{{ env_nucleus }}/.repos
+Volume={{ env_nucleus }}/.worktrees:{{ env_nucleus }}/.worktrees
+{% for path in nucarium_nucleus_protected %}
+Volume={{ env_nucleus }}/{{ path }}:{{ env_nucleus }}/{{ path }}:ro
+{% endfor %}
+PodmanArgs=$NUCARIUM_HOOK_VOLUMES
+# The login's configuration folder.
+Volume={{ env_config_dir }}:{{ env_config_dir }}
+# The box's Claude Code, nucleate and nucleated, and the agent server's
+# script, read-only.
+Volume={{ agent_home }}/.local/share/claude:{{ agent_home }}/.local/share/claude:ro
+Volume={{ agent_home }}/.local/bin:{{ agent_home }}/.local/bin:ro
+# nucleated's hook: its configuration read-only, and the spool it writes.
+Volume={{ nucarium_nucleated_hook_dir }}:{{ nucarium_nucleated_hook_dir }}:ro
+Volume={{ nucarium_nucleated_state_dir }}/spool:{{ nucarium_nucleated_state_dir }}/spool
+# The GitHub App's token; the environment's variables, setup files, nucleate
+# configuration and repository list; the box's helpers; and its Git and npm
+# settings: all read-only.
+Volume=/run/agent-tokens:/run/agent-tokens:ro
+Volume=/etc/nucarium/environments/{{ env.name }}:/etc/nucarium/environments/{{ env.name }}:ro
+Volume={{ nucarium_lib_dir }}:{{ nucarium_lib_dir }}:ro
+Volume={{ nucarium_box_dir }}:{{ nucarium_box_dir }}:ro
+# The folder the server runs in, named after the environment, which is the
+# name the Claude app shows for it. It holds the worktree hooks.
+Volume={{ nucarium_servers_dir }}/{{ env.name }}:{{ nucarium_servers_dir }}/{{ env.name }}:ro
+WorkingDir={{ nucarium_servers_dir }}/{{ env.name }}
+# tmux holds the server, as on the host (agent-env-hold).
+Exec={{ nucarium_lib_dir }}/agent-env-hold
+# Time for the sessions to finish what they are writing.
+StopTimeout=60
+
+[Service]
+# Inside the box's memory cap, with every other agent server.
+Slice=agents.slice
+# Only while the environment runs in its container.
+ExecCondition={{ nucarium_lib_dir }}/agent-server-runtime is {{ env.name }} container
+# Stops with a message when the nucleus's protected files are not as they
+# should be, or there is no image yet; lists the hooks mounts.
+ExecStartPre={{ nucarium_lib_dir }}/agent-env-start {{ env.name }} {{ env_nucleus }} %t/agent-env-{{ env.name }}.volumes
+EnvironmentFile=-%t/agent-env-{{ env.name }}.volumes
+# When the environment has moved back to the host, that one starts now.
+ExecStopPost={{ nucarium_lib_dir }}/agent-server-runtime hand-over {{ env.name }} container
+# The server exits by design after about ten minutes with no session, and
+# starts again.
+Restart=always
+RestartSec=15
+# When the memory cap stops one session, the others carry on.
+OOMPolicy=continue
+{% if env_runtime == 'container' %}
+
+[Install]
+WantedBy=default.target
+{% endif %}

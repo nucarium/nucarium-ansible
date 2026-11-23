@@ -7,14 +7,19 @@ After=network-online.target
 # Run before agent-server@%i.service. That is a user unit of the agent user,
 # which systemd cannot order after a system unit, so the agent server's start
 # script waits for this one instead, and starts whether it succeeded or not.
+# An environment in a container does not wait: its agent server starts from
+# the image built last, and this one starts it once an image is first there.
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 Environment=NUCLEUS_ROOT={{ nucleus_root }}
+# Whose Podman builds a container environment's image.
+Environment=NUCARIUM_AGENT_USER={{ agent_user }}
 ExecStart=/usr/local/sbin/nucarium-env-setup %i
-# The script's own limit is 30 minutes; this only backs it up.
-TimeoutStartSec=35min
+# The script's own limit is 30 minutes; this only backs it up, with time for
+# a container environment's image to be saved after its script.
+TimeoutStartSec=45min
 
 [Install]
 WantedBy=multi-user.target

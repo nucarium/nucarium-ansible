@@ -1,0 +1,94 @@
+---
+# What each container environment's image is built from, besides its setup
+# script and variables: the base image (image.env) and the variables that
+# send its build through its proxy (network.env). Root's, beside the script,
+# so that nucarium-env-setup builds the image from them, and builds a new
+# one when one of them changes. Also what its container reads of its own
+# nucleus: nucleate's configuration (nucleate.toml) and the repositories it
+# offers (repos, one clone address per line), which its agent server clones
+# when its nucleus lacks one. An environment on the host has none of these.
+
+- name: Read the settings of the container environments' network
+  ansible.builtin.include_vars: "{{ role_path }}/../env_runtime/vars/proxy.yml"
+  when: env_runtime_proxy_env is not defined
+
+- name: Read the base image's settings
+  ansible.builtin.include_vars: "{{ role_path }}/../env_runtime/vars/main.yml"
+  when: env_runtime_base_image is not defined
+
+# Built by the env_runtime role, which runs first, as the agent user.
+- name: Read the id of the current base image
+  ansible.builtin.command:
+    argv: [podman, image, inspect, --format, "{{ '{{' }}.Id{{ '}}' }}", "{{ env_runtime_base_image }}:current"]
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  register: env_setup_base_id
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  when: nucarium_container_envs | length > 0
+
+- name: Stop if there is no base image yet
+  ansible.builtin.assert:
+    that: env_setup_base_id.rc == 0 and env_setup_base_id.stdout is match('^[0-9a-f]{64}$')
+    fail_msg: >-
+      There is no base image for container environments yet
+      ({{ env_runtime_base_image }}:current in the agent user's Podman). It is
+      built by the env_runtime role: run ansible-playbook site.yml --tags
+      env_runtime,env_setup.
+    quiet: true
+  # A dry run builds nothing, so on a new box there is nothing to read yet.
+  when: nucarium_container_envs | length > 0 and not ansible_check_mode
+
+- name: Write each container environment's base image
+  ansible.builtin.copy:
+    content: |
+      # Environment {{ env.name }}'s base image, by id. Written by the Nucarium
+      # box recipe; nucarium-env-setup builds the environment's image from it.
+      NUCARIUM_ENV_BASE={{ env_setup_base_id.stdout }}
+    dest: "{{ env_setup_etc_dir }}/{{ env.name }}/image.env"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  register: env_setup_image_env
+
+- name: Write each container environment's network variables
+  ansible.builtin.template:
+    src: network.env.j2
+    dest: "{{ env_setup_etc_dir }}/{{ env.name }}/network.env"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  register: env_setup_network_env
+
+- name: Write each container environment's nucleate configuration and repositories
+  ansible.builtin.template:
+    src: "{{ item.1 }}.j2"
+    dest: "{{ env_setup_etc_dir }}/{{ item.0.name }}/{{ item.1 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    env: "{{ item.0 }}"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | product(['nucleate.toml', 'repos']) | list }}"
+  loop_control:
+    label: "{{ item.0.name }}: {{ item.1 }}"
+
+- name: Remove them for each environment on the host
+  ansible.builtin.file:
+    path: "{{ env_setup_etc_dir }}/{{ item.0.name }}/{{ item.1 }}"
+    state: absent
+  loop: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | product(['image.env', 'network.env', 'nucleate.toml', 'repos']) | list }}"
+  loop_control:
+    label: "{{ item.0.name }}: {{ item.1 }}"
+  register: env_setup_left_container

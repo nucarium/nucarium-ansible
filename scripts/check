@@ -12,10 +12,14 @@ shell_files="
   scripts/check
   roles/agent_servers/files/agent-server
   roles/agent_servers/files/agent-server-stop
+  roles/agent_servers/files/agent-server-runtime
+  roles/agent_servers/files/agent-env-start
+  roles/agent_servers/files/agent-env-hold
   roles/claude/files/session-env.sh
   roles/claude/files/terraform-credentials-agentvault
   roles/day2/files/agent-gc
   roles/env_setup/files/nucarium-env-setup
+  roles/env_runtime/files/build/nucarium-env-build
 "
 
 echo "== syntax"
@@ -42,14 +46,15 @@ ansible-playbook tests/render.yml -e @tests/three-networks.yml
 echo "== render the container environments' networks and proxies"
 ansible-playbook tests/proxy.yml
 
-echo "== the proxy's decisions"
+echo "== the proxy's decisions and agent-env-start's refusals"
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 echo "== refuse environments the recipe cannot set up"
 # Each must stop the playbook before anything is rendered, with a message
-# that says what is wrong.
+# that says what is wrong. A third argument is the nucleate_version to try
+# it with, 0.7.0 when there is none.
 refuse() {
-  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" 2>&1); then
+  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" -e "nucleate_version=${3:-0.7.0}" 2>&1); then
     echo "Accepted, but must be refused: $2"
     exit 1
   fi
@@ -64,6 +69,15 @@ refuse() {
 }
 refuse 'runtime is "docker", and must be host or container' '{"name": "main", "runtime": "docker"}'
 refuse 'network is "open", and must be none, limited or full' '{"name": "main", "network": "open"}'
+refuse 'runtime is container, which needs nucleate 0.7.0 or later, and nucleate_version is 0.6.0' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude-second"}' 0.6.0
+refuse 'runtime is container, whose config_dir must be a folder of its own named .claude-<something>' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/logins/second"}'
+refuse 'runtime is container, and its config_dir /home/agent/.claude-two is also another environment' '{"name": "one", "runtime": "container", "config_dir": "/home/agent/.claude-two"}, {"name": "two", "config_dir": "/home/agent/.claude-two"}'
+refuse 'runtime is container, which needs a config_dir of its own, such as /home/agent/.claude-main: the first login (~/.claude) stays on the host' '{"name": "main", "runtime": "container"}'
+refuse 'runtime is container, which needs a config_dir of its own' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude/"}'
+refuse 'config_dir is /home/agent/.claude-was/, and must be written plainly' '{"name": "main", "config_dir": "/home/agent/.claude-was/"}'
+refuse 'config_dir is /home/agent//.claude-was, and must be written plainly' '{"name": "main", "config_dir": "/home/agent//.claude-was"}'
+refuse 'config_dir is /home/agent/./.claude-was, and must be written plainly' '{"name": "main", "config_dir": "/home/agent/./.claude-was"}'
+refuse 'config_dir is /home/agent/x/../.claude-was, and must be written plainly' '{"name": "main", "config_dir": "/home/agent/x/../.claude-was"}'
 refuse 'keys the recipe does not know: netwrok' '{"name": "main", "netwrok": "full"}'
 refuse 'variables is a set of NAME: value lines' '{"name": "main", "variables": ["NODE_ENV=test"]}'
 refuse 'not shell variable names (letters, digits and _, not starting with a digit): 1ST, NODE-ENV' '{"name": "main", "variables": {"OK": "1", "1ST": "x", "NODE-ENV": "test"}}'
@@ -77,5 +91,21 @@ refuse 'setup_script is the script itself, as text' '{"name": "main", "setup_scr
 # shellcheck disable=SC2016  # the ${#x} is the script's, not this one's
 refuse 'environment main: setup_script has {{, {% or {# in it' '{"name": "main", "setup_script": "n=${#x}"}'
 refuse "environment main: variables has {{, {% or {# in it, which Ansible reads as a template (see the error above). Write !unsafe" '{"name": "main", "variables": {"FORMAT": "{{.Names}}"}}'
+
+# A login a container environment has used is never used on the host again.
+logins=out/render-logins
+rm -rf "$logins" && mkdir -p "$logins"
+was=$(python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' /home/agent/.claude-was)
+echo /home/agent/.claude-was > "$logins/$was"
+if out=$(ansible-playbook tests/render.yml -e '{"environments": [{"name": "was", "config_dir": "/home/agent/.claude-was"}]}' \
+  -e "nucarium_container_logins_dir=$PWD/$logins" 2>&1); then
+  echo "Accepted, but must be refused: a container login on the host"
+  exit 1
+fi
+case "$out" in
+  *"config_dir /home/agent/.claude-was has been a container environment's login"*) echo "refused: a container login on the host" ;;
+  *) printf '%s\n' "$out"; echo "Refused, but without saying why: a container login on the host"; exit 1 ;;
+esac
+refuse '(/home/agent), and is /home/agent/logins/.claude-second' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/logins/.claude-second"}'
 
 echo "== all checks passed"

@@ -1,25 +1,49 @@
 #!/usr/bin/env bash
 # Runs one environment's setup script and records how it went, for nucleated
 # to report to Nucarium Watch. nucarium-env-setup@<name>.service runs this at
-# boot and whenever the recipe changes the script:
+# boot and whenever the recipe changes what it does:
 #
 #   systemctl restart nucarium-env-setup@main.service   # run it again
 #   journalctl -u nucarium-env-setup@main.service       # what it printed
 #
-# The script, /etc/nucarium/environments/<name>/setup.sh, runs with bash, as
-# root, with HOME=/root, in /root, for at most 30 minutes. Its output
-# goes to the journal only. The last run is recorded, atomically, in
-# /var/lib/nucarium/environments/<name>.setup.json: running from start to
-# finish, then ok on exit 0 or failed on any other exit, with 124 for the time
-# limit and 128+n for signal n. A run stopped by a signal is failed even if
-# the script caught it and exited 0.
+# The script is /etc/nucarium/environments/<name>/setup.sh. The last run is
+# recorded, atomically, in /var/lib/nucarium/environments/<name>.setup.json:
+# running from start to finish, then ok on exit 0 or failed on any other
+# exit, with 124 for the time limit of 30 minutes and 128+n for signal n. A
+# run stopped by a signal is failed even if the script caught it and exited
+# 0. An environment with no script has no record.
 #
-# It starts in /root, not in the nucleus: the agent can write the nucleus, and
-# git, npm, pip and their kind read config from the folder they start in, so a
-# root script started there runs whatever the agent left for it. The script
-# gets the nucleus's path in NUCLEUS_ROOT. Anything it runs inside the nucleus
-# as root, the agent can steer; run that part as the agent user instead
-# (runuser -u agent -- ...).
+# Where it runs follows the environment's runtime (the file runtime beside
+# the script):
+#
+# host       The script runs here, with bash, as root, with HOME=/root, in
+#            /root. Its output goes to the journal only. It starts in /root,
+#            not in the nucleus: the agent can write the nucleus, and git,
+#            npm, pip and their kind read config from the folder they start
+#            in, so a root script started there runs whatever the agent left
+#            for it. The script gets the nucleus's path in NUCLEUS_ROOT.
+#            Anything it runs inside the nucleus as root, the agent can
+#            steer; run that part as the agent user instead (runuser -u agent
+#            -- ...).
+#
+# container  The script is built into the environment's image,
+#            localhost/nucarium-env-<name>, in the agent user's Podman: it
+#            runs once, as root in /root, in a container of the base image on
+#            the environment's own network, with the environment's variables
+#            and its proxy's, and what it leaves on disk is the image. What
+#            it starts is not kept, and the nucleus is not there. The image
+#            is tagged with a hash of what it is made of (the base image, the
+#            script, the variables and the network), so it is built only
+#            when one of those changes, and :current names the last one
+#            built; a run with nothing changed builds nothing and leaves the
+#            record alone. A failed build leaves :current as it was. No
+#            script: the image is the base image itself. The build is the
+#            agent user's own, in its own user manager (the units
+#            nucarium-env-check@<name> and nucarium-env-build@<name>, which
+#            run nucarium-env-build); this runner only gives it what to
+#            build, root's, and records how it went. The output is in the
+#            agent user's journal: journalctl --user -u
+#            nucarium-env-build@<name>, as the agent user.
 set -euo pipefail
 
 name="${1:?usage: nucarium-env-setup <name>}"
@@ -31,14 +55,14 @@ case "$name" in
 esac
 : "${NUCLEUS_ROOT:?set by the service}"
 
-script="/etc/nucarium/environments/$name/setup.sh"
+etc="/etc/nucarium/environments/$name"
+script="$etc/setup.sh"
 limit_s=1800
 state_dir=/var/lib/nucarium/environments
 status="$state_dir/$name.setup.json"
-
-if [ ! -f "$script" ]; then
-  echo "Environment $name has no setup script."
-  exit 0
+runtime=host
+if [ -r "$etc/runtime" ] && [ "$(tr -d '[:space:]' < "$etc/runtime")" = container ]; then
+  runtime=container
 fi
 
 now_ms() { date +%s%3N; }
@@ -54,24 +78,23 @@ write_status() {
   mv -f "$tmp" "$status"
 }
 
-sha=$(sha256sum "$script" | cut -d ' ' -f 1)
-started=$(now_ms)
-write_status "{\"state\":\"running\",\"started_at_ms\":$started,\"script_sha256\":\"$sha\"}"
-echo "Running the setup script of environment $name (sha256 $sha)."
-
-rc=0
-if cd /root; then
-  # In the background so that a stop (systemctl stop, or the box shutting
-  # down) is passed on to the script and still recorded, as 128+n.
-  HOME=/root NUCLEUS_ROOT="$NUCLEUS_ROOT" timeout --kill-after=60 "$limit_s" bash "$script" < /dev/null &
+# Runs "$@" in the background and waits for it, so that a stop (systemctl
+# stop, or the box shutting down) is passed on and still recorded, as 128+n.
+# The first signal is kept: a run that was stopped is failed, 128+n, even if
+# what ran caught the signal and exited 0. "again" only tells the loop that
+# wait returned for a signal, not because the run ended. on_stop, if set, is
+# run once at the first signal, before the run is sent TERM.
+on_stop=
+run_and_wait() {
+  "$@" &
   child=$!
-  # The first signal is kept: a run that was stopped is failed, 128+n, even
-  # if the script caught the signal and exited 0. "again" only tells the loop
-  # that wait returned for a signal, not because the script ended.
   signal=
   again=
   # shellcheck disable=SC2329  # called by the traps below
   on_signal() {
+    if [ -z "$signal" ] && [ -n "$on_stop" ]; then
+      $on_stop || true
+    fi
     signal="${signal:-$1}"
     again=1
     kill -TERM "$child" 2> /dev/null || true
@@ -89,21 +112,159 @@ if cd /root; then
   if [ -n "$signal" ]; then
     rc=$((128 + signal))
   fi
-else
-  rc=1
-fi
+}
 
-finished=$(now_ms)
-# timeout exits 124 when the script stops at its signal, but 137 when the
-# script ignored it and had to be killed. Both are the time limit.
-if [ "$rc" -eq 137 ] && [ $((finished - started)) -ge $((limit_s * 1000)) ]; then
-  rc=124
+# Records a finished run, from its start time and exit code.
+finish() {
+  local started=$1 rc=$2 sha=$3 finished state
+  finished=$(now_ms)
+  # timeout exits 124 when the script stops at its signal, but 137 when the
+  # script ignored it and had to be killed. Both are the time limit.
+  if [ "$rc" -eq 137 ] && [ $((finished - started)) -ge $((limit_s * 1000)) ]; then
+    rc=124
+  fi
+  if [ "$rc" -eq 0 ]; then state=ok; else state=failed; fi
+  write_status "{\"state\":\"$state\",\"started_at_ms\":$started,\"finished_at_ms\":$finished,\"exit_code\":$rc,\"script_sha256\":\"$sha\"}"
+  case "$rc" in
+    0) echo "The setup script of environment $name finished." ;;
+    124) echo "The setup script of environment $name ran for $((limit_s / 60)) minutes and was stopped." ;;
+    *) echo "The setup script of environment $name failed with exit code $rc." ;;
+  esac
+  return "$rc"
+}
+
+run_on_host() {
+  if [ ! -f "$script" ]; then
+    echo "Environment $name has no setup script."
+    exit 0
+  fi
+  local sha started
+  sha=$(sha256sum "$script" | cut -d ' ' -f 1)
+  started=$(now_ms)
+  write_status "{\"state\":\"running\",\"started_at_ms\":$started,\"script_sha256\":\"$sha\"}"
+  echo "Running the setup script of environment $name (sha256 $sha)."
+  rc=0
+  if cd /root; then
+    run_and_wait env HOME=/root NUCLEUS_ROOT="$NUCLEUS_ROOT" timeout --kill-after=60 "$limit_s" bash "$script" < /dev/null
+  else
+    rc=1
+  fi
+  finish "$started" "$rc" "$sha" || exit $?
+}
+
+# A unit of the agent user's, in its own user manager.
+agent="${NUCARIUM_AGENT_USER:?set by the service}"
+as_agent() {
+  systemctl --user --machine="$agent@" "$@"
+}
+# Starts one of the agent user's units and waits until it has finished;
+# leaves 0 in rc when it succeeded, and otherwise its main process's exit
+# code, or systemctl's when the unit could not say. A unit that succeeded is
+# soon unloaded and forgets its exit code; one that failed keeps it until
+# reset-failed, which is done here once it is read.
+run_agent_unit() {
+  local unit=$1 main
+  on_stop="as_agent stop --no-block $unit"
+  run_and_wait as_agent start --wait "$unit"
+  on_stop=
+  [ -z "$signal" ] || return 0
+  if [ "$rc" -ne 0 ]; then
+    main=$(as_agent show --property=ExecMainStatus --value "$unit") || main=
+    case "$main" in
+      '' | 0 | *[!0-9]*) ;;
+      *) rc=$main ;;
+    esac
+    as_agent reset-failed "$unit" 2> /dev/null || true
+  fi
+}
+
+run_in_container() {
+  local base tag sha='' started build="/var/lib/nucarium/env-build/$name"
+  base=$(sed -n 's/^NUCARIUM_ENV_BASE=\([0-9a-f]\{64\}\)$/\1/p' "$etc/image.env" 2> /dev/null || true)
+  if [ -z "$base" ]; then
+    echo "Environment $name has no base image recorded in $etc/image.env; the playbook writes it (--tags env_runtime,env_setup)." >&2
+    exit 1
+  fi
+  for file in "$etc/variables.sh" "$etc/network.env" "/etc/nucarium/proxy/$name/rules.json"; do
+    if [ ! -r "$file" ]; then
+      echo "Environment $name has no $file; the playbook writes it (--tags env_runtime,env_setup)." >&2
+      exit 1
+    fi
+  done
+  # What the image is made of. No script: the base image alone.
+  if [ -f "$script" ]; then
+    sha=$(sha256sum "$script" | cut -d ' ' -f 1)
+    tag=$(
+      {
+        echo "base $base"
+        echo "script $sha"
+        echo "variables $(sha256sum < "$etc/variables.sh")"
+        echo "network $(cat "$etc/network.env" "/etc/nucarium/proxy/$name/rules.json" | sha256sum)"
+      } | sha256sum | cut -c 1-12
+    )
+  else
+    tag=$(echo "base $base" | sha256sum | cut -c 1-12)
+  fi
+
+  # What the agent user's build reads, root's: build.env says what to build,
+  # and run/, mounted read-only into the build, holds what the script needs.
+  # The script is the agent user's to read: the build runs as the agent user,
+  # and the image holds whatever the script wrote anyway.
+  rm -rf "$build"
+  install -d -m 0755 "$build" "$build/run"
+  printf 'NUCARIUM_ENV_TAG=%s\nNUCARIUM_ENV_BASE=%s\n' "$tag" "$base" > "$build/build.env"
+  if [ -n "$sha" ]; then
+    install -m 0644 "$etc/variables.sh" "$etc/network.env" "$build/run/"
+    install -o "$agent" -g "$agent" -m 0400 "$script" "$build/run/setup.sh"
+  fi
+
+  # At boot this may run before logind has started the agent user's manager.
+  systemctl start "user@$(id -u "$agent").service"
+
+  # The check fails, as its answer, when the image needs building.
+  run_agent_unit "nucarium-env-check@$name.service" 2> /dev/null
+  if [ -z "$signal" ] && [ "$rc" -eq 0 ]; then
+    echo "The image of environment $name is up to date (localhost/nucarium-env-$name:$tag)."
+    rm -rf "$build/run"
+    # The image of a script built before, used again (the script was put
+    # back as it was): the record says so, rather than how some other script
+    # last went. An up-to-date image whose record already says ok, the boot
+    # of an unchanged box, leaves the record as it is.
+    if [ -n "$sha" ] && ! grep -q "\"state\":\"ok\",.*\"script_sha256\":\"$sha\"" "$status" 2> /dev/null; then
+      started=$(now_ms)
+      write_status "{\"state\":\"ok\",\"started_at_ms\":$started,\"finished_at_ms\":$started,\"exit_code\":0,\"script_sha256\":\"$sha\"}"
+      echo "Its setup script (sha256 $sha) was built into it before."
+    fi
+    exit 0
+  fi
+  [ -z "$signal" ] || exit "$rc"
+
+  if [ -z "$sha" ]; then
+    echo "Environment $name has no setup script: its image is the base image."
+    run_agent_unit "nucarium-env-build@$name.service"
+    rm -rf "$build/run"
+    [ "$rc" -eq 0 ] || exit "$rc"
+  else
+    started=$(now_ms)
+    write_status "{\"state\":\"running\",\"started_at_ms\":$started,\"script_sha256\":\"$sha\"}"
+    echo "Building the image of environment $name with its setup script (sha256 $sha) as localhost/nucarium-env-$name:$tag."
+    run_agent_unit "nucarium-env-build@$name.service"
+    rm -rf "$build/run"
+    finish "$started" "$rc" "$sha" || exit $?
+  fi
+
+  # The agent server waits for an image before it starts, and gives up after
+  # a few tries. Started now, unless an agent server of the environment is
+  # already running: a running one is never stopped for a new image, and
+  # takes it up at its next start.
+  if ! as_agent is-active --quiet "agent-env-$name.service" "agent-server@$name.service"; then
+    as_agent reset-failed "agent-env-$name.service" 2> /dev/null || true
+    as_agent start --no-block "agent-env-$name.service" || true
+  fi
+}
+
+if [ "$runtime" = container ]; then
+  run_in_container
+else
+  run_on_host
 fi
-if [ "$rc" -eq 0 ]; then state=ok; else state=failed; fi
-write_status "{\"state\":\"$state\",\"started_at_ms\":$started,\"finished_at_ms\":$finished,\"exit_code\":$rc,\"script_sha256\":\"$sha\"}"
-case "$rc" in
-  0) echo "The setup script of environment $name finished." ;;
-  124) echo "The setup script of environment $name ran for $((limit_s / 60)) minutes and was stopped." ;;
-  *) echo "The setup script of environment $name failed with exit code $rc." ;;
-esac
-exit "$rc"

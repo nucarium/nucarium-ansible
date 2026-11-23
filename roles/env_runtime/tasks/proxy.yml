@@ -96,6 +96,8 @@
   loop_control:
     loop_var: env
     label: "{{ env.name }}"
+  # A new network builds the environment's image again (the env_setup role).
+  register: env_runtime_proxy_rules_written
 
 - name: Write each environment's networks and proxy
   become: true

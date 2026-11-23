@@ -1,7 +1,9 @@
 ---
 # The nucleus is the workspace folder: bare clones in .repos/, one folder per
 # session in .worktrees/, seed files in .seeds/. nucleate builds and manages
-# it; this role only says where it is and which repositories it offers.
+# it; this role only says where it is and which repositories it offers. The
+# environments on the host share this one; each container environment has
+# its own (container-nucleus.yml).
 - name: The nucleus, for the agent user
   become: true
   become_user: "{{ agent_user }}"
@@ -30,10 +32,12 @@
         mode: "0644"
 
     - name: Register the worktree hooks at the nucleus root
-      ansible.builtin.copy:
-        src: nucleus-settings.json
+      ansible.builtin.template:
+        src: nucleus-settings.json.j2
         dest: "{{ nucleus_root }}/.claude/settings.json"
         mode: "0644"
+      vars:
+        workspace_nucleate: $HOME/.local/bin/nucleate
 
     - name: Install the nucleus instructions
       ansible.builtin.copy:
@@ -47,7 +51,7 @@
     - name: Make each repository available
       ansible.builtin.command: >-
         nucleate clone
-        https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git
+        {{ nucarium_repo_url }}
       args:
         creates: "{{ nucleus_root }}/.repos/{{ item | basename }}.git"
       loop: "{{ repos }}"
@@ -58,10 +62,14 @@
 
     # User scope, once per Claude login: a session's own folder is
     # .worktrees/<session>/, where project-level MCP settings are not found.
+    # Only for the logins on the host: claude mcp get starts the servers a
+    # login names, and a container environment's login is the container's
+    # to write, so it is never run here. Its agent server registers the
+    # server itself, inside its container, at every start.
     - name: Check whether each login has the nucleate MCP server
       ansible.builtin.command: claude mcp get nucleate
       environment: "{{ env_claude }}"
-      loop: "{{ environments }}"
+      loop: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | list }}"
       loop_control:
         loop_var: env
         label: "{{ env.name }}"
@@ -96,3 +104,6 @@
         label: "{{ found.env.name }}"
       changed_when: true
       when: found.rc != 0 or (agent_home ~ '/.local/bin/nucleate mcp') not in found.stdout
+
+- name: Each container environment's own nucleus
+  ansible.builtin.import_tasks: container-nucleus.yml

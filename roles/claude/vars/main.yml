@@ -4,7 +4,16 @@
 # nothing and exits 0 within two seconds whatever happens, so it can never
 # hold a session up. SessionEnd alone is not async, so the event is written
 # before the session's process goes away.
-claude_nucleated_hook: $HOME/.local/bin/nucleated hook
+#
+# On the host, from the agent user's home. In a container, HOME is /root and
+# the box's ~/.local/bin is mounted at its own path, so the path is written
+# out; nucleated's config sync owns both forms.
+claude_nucleated_hook: "{{ agent_home ~ '/.local/bin/nucleated hook' if env_runtime == 'container' else '$HOME/.local/bin/nucleated hook' }}"
+
+# The SessionStart hook that adds the box's and the environment's variables
+# to every session: root's, so that no session can change what the next one
+# starts with, and at the same path in every container environment.
+claude_session_env: "{{ nucarium_lib_dir }}/session-env.sh"
 
 # The notifications that change what a session is waiting for.
 claude_nucleated_notifications:

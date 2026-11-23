@@ -3,7 +3,9 @@
 # variables a session on this box needs, then the environment's own
 # (variables in environments, group_vars/all.yml), which the env_setup role
 # writes, shell-quoted and root-owned, to
-# /etc/nucarium/environments/<name>/variables.sh.
+# /etc/nucarium/environments/<name>/variables.sh. The same on the host and in
+# a container environment, which has both folders mounted at their own paths
+# and HOME=/root.
 if [ -n "$CLAUDE_ENV_FILE" ]; then
   cat >> "$CLAUDE_ENV_FILE" <<'ENVEOF'
 export GH_TOKEN="$(cat /run/agent-tokens/github 2>/dev/null)"

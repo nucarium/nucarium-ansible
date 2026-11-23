@@ -1,0 +1,100 @@
+---
+# What builds a container environment's image, and the box's own Git and
+# npm settings its containers use. Only on a box with a container
+# environment.
+
+# The image's builder is the agent user's: its units run in the agent user's
+# own manager, which the root runner nucarium-env-setup starts them in.
+- name: The image builder, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  block:
+    - name: Create the folders for the builder and its units
+      ansible.builtin.file:
+        path: "{{ agent_home }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - .local/bin
+        - .config/systemd/user
+
+    - name: Install the image builder
+      ansible.builtin.copy:
+        src: build/nucarium-env-build
+        dest: "{{ agent_home }}/.local/bin/nucarium-env-build"
+        mode: "0755"
+
+    - name: Install its units
+      ansible.builtin.copy:
+        src: build/{{ item }}
+        dest: "{{ agent_home }}/.config/systemd/user/{{ item }}"
+        mode: "0644"
+      loop:
+        - nucarium-env-build@.service
+        - nucarium-env-check@.service
+
+    - name: Reload the agent user's units
+      ansible.builtin.systemd_service:
+        scope: user
+        daemon_reload: true
+
+# Root's, so that nothing in a container rewrites how the box signs or what
+# it authenticates as. Mounted read-only into every container environment
+# at the same path; the base image's /etc/gitconfig includes gitconfig. The
+# key and the token are the agent user's to read, as on the box itself:
+# inside a container the agent user is root.
+- name: Create the folder of the box's Git and npm settings
+  ansible.builtin.file:
+    path: "{{ nucarium_box_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the box's Git settings
+  ansible.builtin.template:
+    src: gitconfig.j2
+    dest: "{{ nucarium_box_dir }}/gitconfig"
+    owner: root
+    group: root
+    mode: "0644"
+
+# The key the toolchain role made for the box, whose public half is
+# registered on GitHub for signing.
+- name: Copy the commit-signing key pair
+  ansible.builtin.copy:
+    src: "{{ agent_home }}/.ssh/id_ed25519_signing{{ item.suffix }}"
+    dest: "{{ nucarium_box_dir }}/signing{{ item.suffix }}"
+    remote_src: true
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - suffix: ""
+      owner: "{{ agent_user }}"
+      mode: "0600"
+    - suffix: .pub
+      owner: root
+      mode: "0644"
+  loop_control:
+    label: signing{{ item.suffix }}
+
+- name: Write the GitHub Packages token (download-only)
+  ansible.builtin.copy:
+    dest: "{{ nucarium_box_dir }}/npmrc"
+    content: |
+      @{{ github_org }}:registry=https://npm.pkg.github.com
+      //npm.pkg.github.com/:_authToken={{ secrets.npm_token }}
+    owner: "{{ agent_user }}"
+    group: "{{ agent_user }}"
+    mode: "0600"
+  no_log: true
+  when: secrets.npm_token is defined
+
+- name: Remove it when there is none
+  ansible.builtin.file:
+    path: "{{ nucarium_box_dir }}/npmrc"
+    state: absent
+  when: secrets.npm_token is not defined

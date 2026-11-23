@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Which of an environment's two agent servers runs: agent-server@<name> on
+# the host, or agent-env-<name> in the environment's container. The recipe
+# writes the environment's runtime, host or container, to
+# /etc/nucarium/environments/<name>/runtime; with no such file it is host.
+# The two units conflict with each other, so systemd never runs both, and
+# the recipe enables the one the runtime names and disables the other
+# without stopping it. Both units run this:
+#
+#   agent-server-runtime is <name> host|container
+#       As the unit's ExecCondition: exits 0 when that is the environment's
+#       runtime, so the unit starts, and 1 when it is not, so the unit stays
+#       stopped. A unit whose runtime it no longer is does not start again,
+#       neither at boot nor after its server exits.
+#
+#   agent-server-runtime hand-over <name> host|container
+#       As the unit's ExecStopPost: when the environment's runtime is no
+#       longer this unit's, starts the other unit. So a switch takes effect
+#       when the running server stops: by itself after about ten minutes
+#       with no session, or when you stop or restart it. Never while it
+#       runs, so no live session is cut. An environment that is no longer in
+#       the settings (no runtime file, or no agent server settings for the
+#       host unit) has nothing to hand over to. Always exits 0.
+set -euo pipefail
+
+usage() {
+  echo "usage: agent-server-runtime is|hand-over <name> host|container" >&2
+  exit 2
+}
+[ "$#" -eq 3 ] || usage
+action=$1
+name=$2
+this=$3
+case "$action" in is | hand-over) ;; *) usage ;; esac
+case "$name" in '' | -* | *[!a-z0-9-]*) usage ;; esac
+case "$this" in host | container) ;; *) usage ;; esac
+
+configured=host
+file="/etc/nucarium/environments/$name/runtime"
+if [ -r "$file" ] && [ "$(tr -d '[:space:]' < "$file")" = container ]; then
+  configured=container
+fi
+# What the host unit starts the server with (agent-server@.service).
+host_settings="$HOME/.config/agent-servers/$name.env"
+
+unit() {
+  if [ "$1" = container ]; then
+    echo "agent-env-$name.service"
+  else
+    echo "agent-server@$name.service"
+  fi
+}
+
+case "$action" in
+  is)
+    if [ "$configured" = "$this" ]; then
+      exit 0
+    fi
+    echo "Environment $name now runs $([ "$configured" = container ] && echo in its container || echo on the host), as $(unit "$configured"): $(unit "$this") does not start."
+    exit 1
+    ;;
+  hand-over)
+    if [ ! -r "$file" ] || { [ "$configured" = host ] && [ ! -r "$host_settings" ]; }; then
+      exit 0
+    fi
+    if [ "$configured" != "$this" ]; then
+      echo "Environment $name now runs as $(unit "$configured"): starting it."
+      systemctl --user start --no-block "$(unit "$configured")" || true
+    fi
+    exit 0
+    ;;
+esac

@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{ workspace_nucleate }} hook-create", "timeout": 120 }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{ workspace_nucleate }} hook-remove", "timeout": 120 }
+        ]
+      }
+    ]
+  }
+}

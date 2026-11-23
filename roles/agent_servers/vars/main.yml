@@ -1,0 +1,6 @@
+---
+# The environments that have an agent server unit in a container, from the
+# quadlet files found on the box (tasks/container.yml).
+agent_servers_quadlet_names: >-
+  {{ agent_servers_quadlets.files | map(attribute='path') | map('basename')
+  | map('regex_replace', '^agent-env-(.*)\.container$', '\1') | list }}

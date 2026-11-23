@@ -1,0 +1,3 @@
+{% for repo in repos %}
+https://github.com/{{ repo if '/' in repo else github_org ~ '/' ~ repo }}.git
+{% endfor %}

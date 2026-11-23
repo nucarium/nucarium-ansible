@@ -1,6 +1,8 @@
 ---
-# Each environment's variables, its setup script and the summary nucleated
-# reports. Its network is in its Claude Code settings (the claude role).
+# Each environment's variables, its setup script, where it runs, and the
+# summary nucleated reports. On the host, its network is in its Claude Code
+# settings (the claude role); in a container, its proxy's rules (the
+# env_runtime role).
 
 - name: Create the folders for the environments
   ansible.builtin.file:
@@ -40,6 +42,51 @@
   loop_control:
     loop_var: env
     label: "{{ env.name }}"
+  register: env_setup_variables
+
+# host or container. Read by the setup runner, and by both agent server
+# units of the environment, so that only the one it names runs
+# (agent-server-runtime, the agent_servers role).
+- name: Write where each environment runs
+  ansible.builtin.copy:
+    content: "{{ env_runtime }}\n"
+    dest: "{{ env_setup_etc_dir }}/{{ env.name }}/runtime"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  register: env_setup_runtimes
+
+# Once a login has been a container's, the host never uses it again
+# (tasks/check-container-logins.yml): one file per login, named after the
+# hash of its config_dir and holding the path. Kept when the environment is
+# removed or renamed.
+- name: Create the record of the logins container environments have used
+  ansible.builtin.file:
+    path: "{{ nucarium_container_logins_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: nucarium_container_envs | length > 0
+
+- name: Record each container environment's login
+  ansible.builtin.copy:
+    content: "{{ env.config_dir }}\n"
+    dest: "{{ nucarium_container_logins_dir }}/{{ env.config_dir | hash('sha256') }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
+- name: What a container environment's image is built from
+  ansible.builtin.import_tasks: container.yml
 
 - name: Install the setup-script runner
   ansible.builtin.copy:
@@ -71,22 +118,6 @@
     label: "{{ env.name }}"
   register: env_setup_scripts
 
-# At every boot, and now for a script that is new or changed. Without
-# waiting: the script may take its full 30 minutes, and nucleated reports how
-# it went. Neither touches an agent server or a session: those are the agent
-# user's own units, and their start script only waits for a script that is
-# running when the server starts.
-- name: Run each new or changed setup script, and at every boot
-  ansible.builtin.systemd_service:
-    name: nucarium-env-setup@{{ item.env.name }}.service
-    enabled: true
-    state: "{{ 'restarted' if item is changed else omit }}"
-    no_block: true
-    daemon_reload: "{{ env_setup_unit is changed }}"
-  loop: "{{ env_setup_scripts.results }}"
-  loop_control:
-    label: "{{ item.env.name }}"
-
 - name: Remove the setup script of each environment that no longer has one
   ansible.builtin.file:
     path: "{{ env_setup_etc_dir }}/{{ env.name }}/setup.sh"
@@ -97,14 +128,56 @@
     label: "{{ env.name }}"
   register: env_setup_removed
 
-- name: Stop running it
+# At every boot, and now when what it does has changed. Without waiting: a
+# script may take its full 30 minutes, and nucleated reports how it went.
+#
+# On the host the unit runs the script, so it is there for an environment
+# that has one, and runs again when the script changes. In a container it
+# builds the environment's image (see nucarium-env-setup), so it is there
+# for every container environment, script or not, and runs again when the
+# script, the variables, the base image or the network changes; a run with
+# nothing changed builds nothing. Either way it runs again when the
+# environment moves between the host and a container.
+#
+# None of this touches an agent server or a session: those are the agent
+# user's own units. On the host their start script only waits for a script
+# that is running when the server starts; a container starts from the image
+# built last, and a new one is used from its next start.
+- name: Run each environment's setup when it has changed, and at every boot
   ansible.builtin.systemd_service:
-    name: nucarium-env-setup@{{ item.env.name }}.service
+    name: nucarium-env-setup@{{ env.name }}.service
+    enabled: true
+    state: "{{ 'restarted' if env_setup_changed else omit }}"
+    no_block: true
+    daemon_reload: "{{ env_setup_unit is changed }}"
+  loop: "{{ environments | selectattr('name', 'in', env_setup_runs) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  vars:
+    # What the run depends on: on the host the script; in a container also
+    # the runtime, the variables, the base image and the network.
+    env_setup_inputs: >-
+      {{ env_setup_scripts.results
+      + ((env_setup_runtimes.results + env_setup_variables.results + env_setup_image_env.results
+          + env_setup_network_env.results + env_runtime_proxy_rules_written.results | default([]))
+         if env_runtime == 'container' else []) }}
+    # An environment just back on the host from a container has its image's
+    # files removed (tasks/container.yml), and its script runs on the host.
+    env_setup_back_on_host: "{{ env_setup_left_container.results | selectattr('item.0.name', 'equalto', env.name) | select('changed') | list }}"
+    env_setup_changed: >-
+      {{ (env_setup_inputs | selectattr('env.name', 'equalto', env.name) | select('changed') | list
+      + env_setup_back_on_host) | length > 0 }}
+
+- name: Stop running it for each environment on the host with no script
+  ansible.builtin.systemd_service:
+    name: nucarium-env-setup@{{ env.name }}.service
     enabled: false
     state: stopped
-  loop: "{{ env_setup_removed.results | select('changed') | list }}"
+  loop: "{{ environments | rejectattr('name', 'in', env_setup_runs) | list }}"
   loop_control:
-    label: "{{ item.env.name }}"
+    loop_var: env
+    label: "{{ env.name }}"
 
 - name: Forget how it last ran
   ansible.builtin.file:
@@ -157,4 +230,5 @@
       loop: >-
         {{ env_setup_gone | map('regex_replace', '^(.*)$', env_setup_etc_dir ~ '/\1') | list
         + env_setup_gone | map('regex_replace', '^(.*)$', env_setup_state_dir ~ '/\1.json') | list
-        + env_setup_gone | map('regex_replace', '^(.*)$', env_setup_state_dir ~ '/\1.setup.json') | list }}
+        + env_setup_gone | map('regex_replace', '^(.*)$', env_setup_state_dir ~ '/\1.setup.json') | list
+        + env_setup_gone | map('regex_replace', '^(.*)$', env_setup_build_dir ~ '/\1') | list }}
