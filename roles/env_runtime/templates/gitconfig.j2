@@ -1,8 +1,7 @@
 # The box's Git settings, as every container environment sees them: the
-# base image's /etc/gitconfig includes this file. Written by the Nucarium box
-# recipe from group_vars/all.yml; the next run rewrites it. A setup script
-# may add its own to /etc/gitconfig or /root/.gitconfig, and those stay in
-# force.
+# base image's /root/.gitconfig includes this file. Written by the Nucarium
+# box recipe from group_vars/all.yml; the next run rewrites it. A setup script
+# may add its own to /root/.gitconfig, and those stay in force.
 [user]
 	name = {{ git_user_name | to_json(ensure_ascii=false) }}
 	email = {{ git_user_email | to_json(ensure_ascii=false) }}

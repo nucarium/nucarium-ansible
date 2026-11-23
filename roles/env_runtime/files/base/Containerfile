@@ -143,9 +143,12 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
 
 # The box's Git identity, signing and GitHub credential helper, from the
-# folder mounted at /etc/nucarium/box. A setup script may add to this file,
-# or write /root/.gitconfig, and what it writes stays in force.
-RUN printf '[include]\n\tpath = /etc/nucarium/box/gitconfig\n' > /etc/gitconfig
+# folder mounted at /etc/nucarium/box, in root's own global config: nucleate
+# runs git with the user's global config and never the system's, so a
+# setting in /etc/gitconfig would reach a session's git but not nucleate's
+# fetches. A setup script may add to this file (git config --global ...) and
+# what it adds stays in force.
+RUN printf '[include]\n\tpath = /etc/nucarium/box/gitconfig\n' > /root/.gitconfig
 
 # Everything above answers, or the build fails here rather than in a session.
 RUN set -eux; \

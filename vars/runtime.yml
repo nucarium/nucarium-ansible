@@ -57,7 +57,7 @@ nucarium_lib_dir: /usr/local/lib/nucarium
 # What a container environment uses of the box's own Git and npm settings,
 # root's, mounted read-only at the same path (the env_runtime role): the Git
 # identity, commit signing and GitHub credential helper (gitconfig, which the
-# base image's /etc/gitconfig includes), the signing key pair, and the npm
+# base image's /root/.gitconfig includes), the signing key pair, and the npm
 # token file NPM_CONFIG_GLOBALCONFIG names.
 nucarium_box_dir: /etc/nucarium/box
 
