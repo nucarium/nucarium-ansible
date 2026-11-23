@@ -42,7 +42,7 @@
 
 # Root's, so that nothing in a container rewrites how the box signs or what
 # it authenticates as. Mounted read-only into every container environment
-# at the same path; the base image's /etc/gitconfig includes gitconfig. The
+# at the same path; the base image's /root/.gitconfig includes gitconfig. The
 # key and the token are the agent user's to read, as on the box itself:
 # inside a container the agent user is root.
 - name: Create the folder of the box's Git and npm settings
