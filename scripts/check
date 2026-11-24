@@ -143,8 +143,8 @@ esac
 refuse '(/home/agent), and is /home/agent/logins/.claude-second' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/logins/.claude-second"}'
 
 # An environment that has had a GitHub identity of its own: no environment
-# without one takes its name or login, and sessions on the host never read
-# its nucleus or login, even once it is gone from the settings.
+# without one takes its name or login, and no environment runs on the host
+# beside what it left, even once it is gone from the settings.
 github_envs=out/render-github-envs
 rm -rf "$github_envs" && mkdir -p "$github_envs"
 echo '{"name": "acme", "nucleus": "/home/agent/workspace-acme", "config_dir": "/home/agent/.claude-acme"}' > "$github_envs/acme"
@@ -160,8 +160,6 @@ refuse_recorded() {
 }
 refuse_recorded "environment acme: its name was a container environment's with a GitHub identity of its own" '{"name": "acme", "config_dir": "/home/agent/.claude-acme"}'
 refuse_recorded "environment other: its config_dir /home/agent/.claude-acme was a container environment's" '{"name": "other", "runtime": "container", "config_dir": "/home/agent/.claude-acme"}'
-ansible-playbook tests/render.yml -e "nucarium_github_envs_dir=$PWD/$github_envs" -e '{"render_expected_deny_read":
-  ["/etc/nucarium/environments/*/box", "~/.local/share/containers", "/home/agent/workspace-acme", "/home/agent/.claude-acme"]}' > /dev/null
-echo "a host environment's sandbox never reads a recorded nucleus or login"
+refuse_recorded "runs on the host, and this box has had container environments with a GitHub identity of their own (acme)" '{"name": "main"}'
 
 echo "== all checks passed"

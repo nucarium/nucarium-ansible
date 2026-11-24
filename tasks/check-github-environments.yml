@@ -42,3 +42,20 @@
       | selectattr('name', 'in', nucarium_github_envs_recorded | map(attribute='name') | list) | list
       + environments | rejectattr('github', 'defined') | rejectattr('name', 'in', nucarium_github_envs_recorded | map(attribute='name') | list)
       | selectattr('config_dir', 'defined') | selectattr('config_dir', 'in', nucarium_github_envs_recorded | map(attribute='config_dir') | list) | list }}
+
+# Their logins and code are still on the box, the agent user's. Sessions on
+# the host run podman outside their sandbox as that user, and podman can
+# mount any of it, so no environment runs on the host beside them.
+- name: Stop if an environment runs on the host on a box that has had one
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml: environment{{ 's' if github_envs_host | length > 1 else '' }}
+      {{ github_envs_host | join(', ') }} {{ 'run' if github_envs_host | length > 1 else 'runs' }} on the host, and this box has had
+      container environments with a GitHub identity of their own
+      ({{ nucarium_github_envs_recorded | map(attribute='name') | unique | join(', ') }}), whose logins and code are still on it.
+      Sessions on the host run podman outside their sandbox as the user that owns them, so they could read
+      them: keep every environment in a container, or first remove those environments' nuclei and logins
+      and their records in {{ nucarium_github_envs_dir }} by hand. Nothing on the box has been changed.
+  when: nucarium_github_envs_recorded | length > 0 and github_envs_host | length > 0
+  vars:
+    github_envs_host: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='name') | list }}"
