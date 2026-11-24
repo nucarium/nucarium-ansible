@@ -358,9 +358,9 @@ ups_ondelay: 120
 # nucleate_sha256 for x86_64, nucleate_sha256_aarch64 for aarch64 (arm64).
 # A box downloads its own architecture's archive and refuses it unless it
 # matches. Change all three together.
-nucleate_version: "0.8.0"
-nucleate_sha256: "8af58aa27d76b2219760052898010aef4d3f16205513b9e3f48173d488d7e201"
-nucleate_sha256_aarch64: "27d8382b786da7b53e8b652c87d1514059cf431dfcf9dbf6f707a82eceb59c80"
+nucleate_version: "0.9.0"
+nucleate_sha256: "39cb848dc889bf9409c9d074f60f97b470a43522953dbeb1dac9c4271c62db5c"
+nucleate_sha256_aarch64: "b0366e1ccdf1fb4ead2b3dc144bb2d1a0ecf68aa5890a7de9ca918dfc8728ecf"
 
 # For testing a build of your own: the path, on your workstation, of a
 # .tar.gz holding the two binaries, nucleate and nucleated, at its top level.
