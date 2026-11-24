@@ -30,6 +30,16 @@
     env_allowed_hosts: "{{ env.allowed_hosts | default([], true) }}"
     env_variables: "{{ env.variables | default({}, true) }}"
     env_setup_script: "{{ env.setup_script | default('', true) }}"
+    # What only a container environment can have: its own repositories (the
+    # box's repos when it has none), the names of its secret variables, its
+    # own GitHub identity (empty: the box's), and its start script. The
+    # folder of Git settings its container has at nucarium_box_dir: its own
+    # with an identity of its own, else the box's.
+    env_repos: "{{ env.repos if env.repos is defined else repos }}"
+    env_secret_variables: "{{ env.secret_variables | default([], true) }}"
+    env_github: "{{ env.github | default({}, true) }}"
+    env_start_script: "{{ env.start_script | default('', true) }}"
+    env_box_dir: "{{ nucarium_env_box_dir if env_github else nucarium_box_dir }}"
     # The unit that runs its agent server: on the host, or in its container.
     env_unit: "{{ 'agent-env-' ~ env.name ~ '.service' if env_runtime == 'container' else 'agent-server@' ~ env.name ~ '.service' }}"
     # Its nucleus: the shared one on the host; in a container, its own, which
@@ -81,6 +91,10 @@
       no_log: true
       tags: always
 
+    - name: Check each container environment's secret variables have values
+      ansible.builtin.import_tasks: tasks/check-secret-variables.yml
+      tags: always
+
     - name: Use the vault's sudo password
       ansible.builtin.set_fact:
         ansible_become_password: "{{ secrets.become_password }}"
@@ -101,6 +115,10 @@
     - name: Check the logins of container environments
       ansible.builtin.import_tasks: tasks/check-container-logins.yml
       when: agent_home is defined
+      tags: always
+
+    - name: Check the environments that have had a GitHub identity of their own
+      ansible.builtin.import_tasks: tasks/check-github-environments.yml
       tags: always
 
   roles:

@@ -8,9 +8,12 @@
 # The host makes it and clones into it only while it is new: before any
 # container has run there, git on the host meets nothing a container wrote.
 # After that the host runs no git in it but nucleated's, which checks each
-# repository first; a repository added to repos later is cloned by the
-# container itself, at its agent server's next start, from the list the
-# env_setup role writes.
+# repository first; a repository added to its list later (the environment's
+# repos, else the box's) is cloned by the container itself, at its agent
+# server's next start, from the list the env_setup role writes. The host
+# never clones into the nucleus of an environment with a GitHub identity of
+# its own: it has no credentials for those repositories, and the container
+# clones them all with its own.
 - name: The container environments' own nuclei, for the agent user
   become: true
   become_user: "{{ agent_user }}"
@@ -20,6 +23,10 @@
     workspace_container_envs: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
     # Those whose nucleus did not exist when this run began.
     workspace_new_nuclei: "{{ workspace_nuclei_found.results | rejectattr('stat.exists') | map(attribute='env.name') | list }}"
+    # What the host clones into them: each new one's repositories, for those
+    # that use the box's GitHub App.
+    workspace_new_clones: >-
+      {% set ns = namespace(out=[]) %}{% for e in workspace_container_envs | selectattr('name', 'in', workspace_new_nuclei) | rejectattr('github', 'defined') %}{% for r in e.repos | default(repos) %}{% set ns.out = ns.out + [[e, r]] %}{% endfor %}{% endfor %}{{ ns.out }}
   block:
     - name: Look for each one
       ansible.builtin.stat:
@@ -47,7 +54,7 @@
       vars:
         env: "{{ outer.0 }}"
         item: "{{ outer.1 }}"
-      loop: "{{ workspace_container_envs | selectattr('name', 'in', workspace_new_nuclei) | product(repos) | list }}"
+      loop: "{{ workspace_new_clones }}"
       loop_control:
         loop_var: outer
         label: "{{ outer.0.name }}: {{ outer.1 }}"

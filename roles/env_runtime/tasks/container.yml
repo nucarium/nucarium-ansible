@@ -81,6 +81,99 @@
   loop_control:
     label: signing{{ item.suffix }}
 
+# A container environment with a GitHub identity of its own (github on the
+# environment) uses none of the box's: its container has this folder,
+# laid out like the box's, at the same path in place of it. Its Git
+# identity, commit signing with a key of its own, a credential helper that
+# answers with the environment's own GITHUB_TOKEN (a secret variable), and
+# that token as a file.
+# No packages token: one it needs is its own NODE_AUTH_TOKEN.
+- name: The Git settings of each environment with a GitHub identity of its own
+  vars:
+    env_runtime_identity_envs: "{{ environments | selectattr('name', 'in', env_runtime_container_envs) | selectattr('github', 'defined') | list }}"
+  block:
+    - name: Create its folder
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ env_runtime_identity_envs | map(attribute='name') | map('regex_replace', '^(.*)$', '/etc/nucarium/environments/\\1') | product(['', '/box']) | map('join') | list }}"
+
+    - name: Write its Git settings
+      ansible.builtin.template:
+        src: gitconfig.j2
+        dest: "{{ nucarium_env_box_dir }}/gitconfig"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        env_runtime_git_for: environment {{ env.name }}, which has a GitHub identity of its own
+        env_runtime_git_identity: "{{ env.github }}"
+        env_runtime_git_helper: "{{ nucarium_env_git_credential_helper }}"
+      loop: "{{ env_runtime_identity_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    # Made once and never replaced: its public half is registered on the
+    # environment's GitHub account.
+    - name: Create its commit-signing key
+      ansible.builtin.command:
+        argv: [ssh-keygen, -q, -t, ed25519, -N, "", -C, "{{ inventory_hostname }}-{{ env.name }} agent signing", -f, "{{ nucarium_env_box_dir }}/signing"]
+        creates: "{{ nucarium_env_box_dir }}/signing"
+      loop: "{{ env_runtime_identity_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    # As the box's pair: the key the agent user's, which is root in the
+    # container, and the public half root's.
+    - name: Give its key pair its owners
+      ansible.builtin.file:
+        path: "{{ nucarium_env_box_dir }}/signing{{ outer.1.suffix }}"
+        owner: "{{ outer.1.owner }}"
+        group: "{{ outer.1.owner }}"
+        mode: "{{ outer.1.mode }}"
+      vars:
+        env: "{{ outer.0 }}"
+      loop: >-
+        {{ env_runtime_identity_envs | product([{'suffix': '', 'owner': agent_user, 'mode': '0600'},
+        {'suffix': '.pub', 'owner': 'root', 'mode': '0644'}]) | list }}
+      loop_control:
+        loop_var: outer
+        label: "{{ outer.0.name }}: signing{{ outer.1.suffix }}"
+
+    # Its GITHUB_TOKEN as a file, for nucleate in the container and
+    # nucleated on the host (github_token_file in their configuration), the
+    # agent user's to read: the same path in both. Removed with the
+    # environment's folder.
+    - name: Write its GitHub token
+      ansible.builtin.copy:
+        content: "{{ nucarium_environment_secrets[env.name].GITHUB_TOKEN }}"
+        dest: "{{ nucarium_env_github_token_file }}"
+        owner: "{{ agent_user }}"
+        group: "{{ agent_user }}"
+        mode: "0600"
+      loop: "{{ env_runtime_identity_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+      no_log: true
+
+    # For the closing message: register it as a signing key on the
+    # environment's GitHub account.
+    - name: Copy its public key to the workstation
+      ansible.builtin.fetch:
+        src: "{{ nucarium_env_box_dir }}/signing.pub"
+        dest: "{{ playbook_dir }}/out/{{ inventory_hostname }}-{{ env.name }}-signing.pub"
+        flat: true
+      loop: "{{ env_runtime_identity_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
 - name: Write the GitHub Packages token (download-only)
   ansible.builtin.copy:
     dest: "{{ nucarium_box_dir }}/npmrc"

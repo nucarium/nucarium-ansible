@@ -27,6 +27,7 @@ env_runtime_base_args:
   GRADLE_VERSION: "{{ gradle_version }}"
   CHROME_FOR_TESTING_VERSION: "{{ chrome_for_testing_version }}"
   PLAYWRIGHT_VERSION: "{{ playwright_version }}"
+  NVM_VERSION: "{{ nvm_version }}"
 
 # The image's tag: the start of a hash of the files that make it and the
 # arguments it is built with, so a change to either builds a new image and
@@ -36,3 +37,13 @@ env_runtime_base_tag: >-
   + [env_runtime_base_args | to_json(sort_keys=true)]) | join('\n') | hash('sha256') | truncate(12, true, '', 0) }}
 env_runtime_base_ref: "{{ env_runtime_base_image }}:{{ env_runtime_base_tag }}"
 env_runtime_base_current: "{{ env_runtime_base_image }}:current"
+
+# What gitconfig.j2 writes: the box's Git identity and the GitHub App's
+# credential helper, which every container environment uses but one with a
+# GitHub identity of its own (github on the environment), whose task gives
+# its own. env_runtime_git_for only says, in the file, whose it is.
+env_runtime_git_for: the box, for every container environment without a GitHub identity of its own
+env_runtime_git_identity:
+  name: "{{ git_user_name }}"
+  email: "{{ git_user_email }}"
+env_runtime_git_helper: "{{ nucarium_git_credential_helper }}"

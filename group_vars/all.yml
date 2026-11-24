@@ -79,9 +79,15 @@ github_app_installation_id: "12345678"
 # agent server (Claude Code's Remote Control server) over the nucleus, shown
 # as one environment in Nucarium Watch. Most boxes have one. Add an entry to
 # run a second login of the same organisation on this box. Environments on
-# one box are not isolated from each other: they share the agent user, the
-# nucleus, its repositories and the GitHub App. Work for a different
-# organisation belongs on its own box.
+# the host are not isolated from each other: they share the agent user, the
+# nucleus, its repositories and the GitHub App. A container environment
+# (runtime: container) can have repositories, secrets and a GitHub identity
+# of its own, below, so that it can belong to another owner: the others
+# cannot see its credentials or its code. Environments of different owners
+# need every environment on the box in a container: sessions on the host
+# run podman outside their sandbox, as the user that owns every container's
+# secrets, so the playbook refuses github and secret_variables on a box
+# with an environment on the host.
 #
 #   name        A short label: lower-case letters, digits and hyphens. It
 #               names the service (agent-server@<name>, or agent-env-<name>
@@ -162,10 +168,13 @@ github_app_installation_id: "12345678"
 #                  image change), as a cloud environment's does: with the
 #                  environment's variables and network, and without the
 #                  nucleus. What it writes, /root included, is in every
-#                  session; what it starts is not running, so a session
-#                  starts its own services. Its output is in the agent
-#                  user's journal (journalctl --user -u
-#                  nucarium-env-build@<name>).
+#                  session; what it starts is not running, which is what
+#                  start_script is for. What it exports in a file in
+#                  /etc/profile.d reaches the agent server and every
+#                  session, as in a cloud session. Its output is in the
+#                  agent user's journal (journalctl --user -u
+#                  nucarium-env-build@<name>). It does not get the secret
+#                  variables.
 #
 # Ansible reads {{, {% and {# in a value as a template, and a script often
 # has them: ${#list[@]}, or docker ps --format '{{.Names}}'. Write !unsafe
@@ -190,6 +199,83 @@ github_app_installation_id: "12345678"
 #       packages=(libvips-dev jq)
 #       echo "Installing ${#packages[@]} packages"
 #       apt-get install -y --no-install-recommends "${packages[@]}"
+#
+# A container environment can also have these, which a host environment
+# cannot (the playbook refuses them there). Left out, it uses the box's:
+#
+#   repos            Its own repositories, in place of the box's repos, in
+#                    the same form: a bare name is in github_org, owner/name
+#                    names its owner. Its nucleus offers only these.
+#   secret_variables Names of variables whose values are secret, one per
+#                    line, set in its container, its agent server and every
+#                    session (a Terraform token, say). The values are not
+#                    in this file: each is environment_secrets.<env>.<NAME>
+#                    in a file of your own you give the playbook
+#                    (-e @environment-secrets.yml, an Ansible Vault file
+#                    say), which leaves secret_refs as they are; a whole
+#                    secrets given with -e may hold them as
+#                    secrets.environments instead. The playbook stops,
+#                    changing nothing, when one has no value. Each is kept
+#                    as the agent user's Podman secret
+#                    nucarium-env-<env>-<name>. A name may not also be in
+#                    variables, and GITHUB_TOKEN and GH_TOKEN need github.
+#                    Not in the image: the setup script does not get them.
+#   github           Its own GitHub identity: name: and email:, for its
+#                    commits. It needs GITHUB_TOKEN in secret_variables,
+#                    a token of that GitHub account, which its Git uses for
+#                    github.com, and nucleate and nucleated, from a file in
+#                    the environment's own folder, for its repositories.
+#                    With it, the environment uses nothing of the box's
+#                    GitHub: not the GitHub App, not git_user_name and its
+#                    signing key, not the packages token (list
+#                    NODE_AUTH_TOKEN in secret_variables for one of its
+#                    own). It signs its commits with a key of its own, made
+#                    once on the box; the playbook copies its public half to
+#                    out/<box>-<env>-signing.pub, and the closing message
+#                    says how to register it on that account. The host clones
+#                    none of its repositories: its agent server clones them,
+#                    in the container, at its first start. The box remembers
+#                    it: removed or renamed, its nucleus and login stay on
+#                    the box, sessions on the host never read them, and the
+#                    playbook refuses an environment without github that has
+#                    its name or config_dir.
+#   start_script     A bash script, run as root in /root in its container
+#                    each time the container starts, before the agent server:
+#                    for the services the setup script installed (a database
+#                    server, say), which are not running otherwise. Up to five
+#                    minutes; its output is in the server's tmux session,
+#                    and one that fails still lets the server start. What it
+#                    exports in a file in /etc/profile.d reaches the server
+#                    and every session.
+#
+# Changing these needs
+# `--tags claude,env_runtime,env_setup,workspace,agent_servers`; the
+# container takes them up at its next start. Sandboxed commands on the host
+# cannot read a container environment's own Git settings and key, the
+# Podman storage that holds the secret variables, or, once it has had
+# github, its nucleus and login. For example:
+#
+#   - name: acme
+#     config_dir: /home/agent/.claude-acme
+#     runtime: container
+#     repos:
+#       - acme/web
+#       - other-org/tools
+#     secret_variables:
+#       - GITHUB_TOKEN
+#       - TF_TOKEN
+#     github:
+#       name: Acme Agent
+#       email: agent@example.com
+#     start_script: |
+#       service postgresql start
+#
+# with, in the file of environment secrets (-e @environment-secrets.yml):
+#
+#   environment_secrets:
+#     acme:
+#       GITHUB_TOKEN: "..."
+#       TF_TOKEN: "..."
 environments:
   - name: main
     capacity: 12
@@ -300,11 +386,14 @@ node_version: "24"
 #   gradle_version              Gradle, checked against its published sum.
 #
 # The base image of container environments (runtime: container) is built
-# from these same pins and go_version and node_version above; after changing
+# from these same pins and go_version and node_version above, and has nvm
+# at the release nvm_version names, in /opt/nvm as a cloud session has it
+# (nothing sources it: the image's Node stays node_version's). After changing
 # one, `--tags env_runtime` builds it again.
 playwright_version: "1.63.0"
 chrome_for_testing_version: "153.0.8010.12"
 gradle_version: "8.14.3"
+nvm_version: "0.40.8"
 
 # Hosts sandboxed commands may reach beyond what a cloud session allows by
 # default (Claude Code's package-registry, GitHub and cloud-SDK list, kept in

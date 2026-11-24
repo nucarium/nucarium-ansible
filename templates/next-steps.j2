@@ -4,6 +4,14 @@ The box is built. What is left needs you in person:
      gh auth refresh -h github.com -s admin:ssh_signing_key
      ssh {{ agent_user }}@{{ inventory_hostname }} cat .ssh/id_ed25519_signing.pub > {{ inventory_hostname }}-signing.pub
      gh ssh-key add {{ inventory_hostname }}-signing.pub --type signing --title "{{ inventory_hostname }} agent signing"
+{% set identities = environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | selectattr('github', 'defined') | list %}
+{% if identities %}
+   Each environment with a GitHub identity of its own signs with a key of its own, which the playbook copied to out/. Register each on that environment's GitHub account, signed in to gh as that account, whose verified emails must include the environment's email:
+{% for e in identities %}
+     {{ e.name }} ({{ e.github.email }}):
+       gh ssh-key add out/{{ inventory_hostname }}-{{ e.name }}-signing.pub --type signing --title "{{ inventory_hostname }}-{{ e.name }} agent signing"
+{% endfor %}
+{% endif %}
 
 2. Sign each agent server in to Claude and start it once by hand, as {{ agent_user }} on the box. The first start asks questions a service cannot answer: answer y to trust the folder and to enable Remote Control, wait until it says it is connected, press Ctrl+C, then hand over to the service. An environment in a container is started first and waits, inside its container, until it is signed in; then its server asks to enable Remote Control in its tmux session (leave with Ctrl+B then D).
 {% for server in environments %}

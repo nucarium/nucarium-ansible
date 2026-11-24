@@ -4,7 +4,8 @@
 # (files/base/Containerfile), built by the agent user's Podman as
 # localhost/nucarium-base:<hash> and tagged :current; what builds each
 # environment's own image from it (tasks/container.yml), which the env_setup
-# role then runs; the box's Git and npm settings they use; and their
+# role then runs; the box's Git and npm settings they use, or an
+# environment's own; their secret variables (tasks/secrets.yml); and their
 # networks and proxies (tasks/proxy.yml). The builds are the agent user's
 # own work, outside any session and its sandbox, and touch no agent server:
 # a running container keeps the image it started with. On a box with no
@@ -77,6 +78,13 @@
     paths: "{{ env_runtime_quadlet_dir }}"
     patterns: nucarium-proxy-*.container
   register: env_runtime_proxies_present
+
+# Their secret variables. Also run while proxies are still set up, so that
+# when the last container environment goes, or moves back to the host, its
+# secrets go too.
+- name: The container environments' secret variables
+  when: env_runtime_container_envs | length > 0 or env_runtime_proxies_present.matched > 0
+  ansible.builtin.include_tasks: secrets.yml
 
 - name: The container environments' networks and proxies
   when: env_runtime_container_envs | length > 0 or env_runtime_proxies_present.matched > 0

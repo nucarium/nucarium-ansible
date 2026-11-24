@@ -43,11 +43,20 @@ Environment=DISABLE_AUTOUPDATER=1
 # nucleate's configuration for this environment's own nucleus (env_setup).
 Environment=NUCLEATE_CONFIG=/etc/nucarium/environments/{{ env.name }}/nucleate.toml
 Environment=NUCLEATED_CONFIG={{ nucarium_nucleated_hook_dir }}/config.toml
+{% if not env_github %}
 Environment=NPM_CONFIG_GLOBALCONFIG={{ nucarium_box_dir }}/npmrc
-{% if secrets.npm_token is defined %}
+{% endif %}
+{% if secrets.npm_token is defined and not env_github and 'NODE_AUTH_TOKEN' not in env_secret_variables %}
 # The same token as NODE_AUTH_TOKEN, for pnpm, through the ~/.npmrc line
 # agent-env-hold writes (the env_runtime role stores the secret).
 Secret={{ nucarium_npm_secret }},type=env,target=NODE_AUTH_TOKEN
+{% endif %}
+{% if env_secret_variables %}
+# The environment's secret variables, each from the agent user's Podman
+# secret of its own (the env_runtime role stores them).
+{% for s in nucarium_env_secrets | selectattr('env', 'equalto', env.name) %}
+Secret={{ s.secret }},type=env,target={{ s.name }}
+{% endfor %}
 {% endif %}
 Environment=AGENT_SERVER_RUNTIME=container
 Environment=AGENT_SERVER_NAME={{ env.name }}
@@ -58,10 +67,14 @@ Environment=AGENT_SERVER_COMMAND={{ agent_home }}/.local/bin/agent-server
 # The repositories its nucleus offers; the server clones any it lacks.
 Environment=AGENT_SERVER_REPOS=/etc/nucarium/environments/{{ env.name }}/repos
 Environment=AGENT_SERVER_NUCLEUS={{ env_nucleus }}
+# The start script, run as root in the container before its server starts,
+# when there is one (env_setup).
+Environment=AGENT_SERVER_START=/etc/nucarium/environments/{{ env.name }}/start.sh
 # Every path at the same place as on the host, so that the worktrees' git
 # pointers, nucleated's view of them, the hooks' environment matching and
 # the transcripts' folders agree. Folders, never single files, for anything the host replaces.
-# Nothing over /root, where the setup script's files are.
+# Nothing over /root, where the setup script's files are. The one exception
+# is an environment's own Git settings, at the box's path in the container.
 #
 # The environment's own nucleus (env_nucleus, the workspace role makes it),
 # read-write; never the nucleus the host's environments share, so nothing a
@@ -96,13 +109,21 @@ Volume={{ agent_home }}/.local/bin:{{ agent_home }}/.local/bin:ro
 # nucleated's hook: its configuration read-only, and the spool it writes.
 Volume={{ nucarium_nucleated_hook_dir }}:{{ nucarium_nucleated_hook_dir }}:ro
 Volume={{ nucarium_nucleated_state_dir }}/spool:{{ nucarium_nucleated_state_dir }}/spool
+{% if not env_github %}
 # The GitHub App's token; the environment's variables, setup files, nucleate
 # configuration and repository list; the box's helpers; and its Git and npm
 # settings: all read-only.
 Volume=/run/agent-tokens:/run/agent-tokens:ro
+{% else %}
+# The environment's variables, setup files, nucleate configuration and
+# repository list; the box's helpers; and, where the box's Git settings
+# would be, the environment's own (a GitHub identity of its own): all
+# read-only. Neither the GitHub App's token nor the box's Git and npm
+# settings.
+{% endif %}
 Volume=/etc/nucarium/environments/{{ env.name }}:/etc/nucarium/environments/{{ env.name }}:ro
 Volume={{ nucarium_lib_dir }}:{{ nucarium_lib_dir }}:ro
-Volume={{ nucarium_box_dir }}:{{ nucarium_box_dir }}:ro
+Volume={{ env_box_dir }}:{{ nucarium_box_dir }}:ro
 # The folder the server runs in, named after the environment, which is the
 # name the Claude app shows for it. It holds the worktree hooks.
 Volume={{ nucarium_servers_dir }}/{{ env.name }}:{{ nucarium_servers_dir }}/{{ env.name }}:ro
