@@ -38,10 +38,11 @@ echo "== shellcheck"
 # shellcheck disable=SC2086  # the list is split into file names on purpose
 shellcheck $shell_files
 
-echo "== render the templates from the example settings, in three shapes"
+echo "== render the templates from the example settings, in four shapes"
 ansible-playbook tests/render.yml
 ansible-playbook tests/render.yml -e @tests/two-logins.yml
 ansible-playbook tests/render.yml -e @tests/three-networks.yml
+ansible-playbook tests/render.yml -e @tests/own-identities.yml
 
 echo "== render the container environments' networks and proxies"
 ansible-playbook tests/proxy.yml
@@ -91,6 +92,28 @@ refuse 'setup_script is the script itself, as text' '{"name": "main", "setup_scr
 # shellcheck disable=SC2016  # the ${#x} is the script's, not this one's
 refuse 'environment main: setup_script has {{, {% or {# in it' '{"name": "main", "setup_script": "n=${#x}"}'
 refuse "environment main: variables has {{, {% or {# in it, which Ansible reads as a template (see the error above). Write !unsafe" '{"name": "main", "variables": {"FORMAT": "{{.Names}}"}}'
+
+# What only a container environment may have: its own repositories, secret
+# variables, GitHub identity and start script.
+box='"runtime": "container", "config_dir": "/home/agent/.claude-acme"'
+refuse 'repos needs runtime: container, and runtime is host' '{"name": "main", "repos": ["acme/web"]}'
+refuse 'secret_variables needs runtime: container, and runtime is host' '{"name": "main", "secret_variables": ["TF_TOKEN"]}'
+refuse 'github needs runtime: container, and runtime is host' '{"name": "main", "github": {"name": "Acme Agent", "email": "agent@example.com"}}'
+refuse 'start_script needs runtime: container, and runtime is host' '{"name": "main", "start_script": "service postgresql start"}'
+refuse 'github needs GITHUB_TOKEN in secret_variables' "{\"name\": \"acme\", $box, \"secret_variables\": [\"TF_TOKEN\"], \"github\": {\"name\": \"Acme Agent\", \"email\": \"agent@example.com\"}}"
+refuse "github is the environment's Git identity, name: and email:" "{\"name\": \"acme\", $box, \"secret_variables\": [\"GITHUB_TOKEN\"], \"github\": {\"name\": \"Acme Agent\"}}"
+refuse 'secret_variables has names that are not shell variable names (letters, digits and _, not starting with a digit): TF-TOKEN' "{\"name\": \"acme\", $box, \"secret_variables\": [\"TF-TOKEN\"]}"
+refuse 'secret_variables has names that are also in variables: TF_TOKEN' "{\"name\": \"acme\", $box, \"variables\": {\"TF_TOKEN\": \"x\"}, \"secret_variables\": [\"TF_TOKEN\"]}"
+refuse 'secret_variables is a list of variable names' "{\"name\": \"acme\", $box, \"secret_variables\": \"TF_TOKEN\"}"
+refuse 'secret_variables names a variable more than once, or two whose names differ only in case: tf_token' "{\"name\": \"acme\", $box, \"secret_variables\": [\"TF_TOKEN\", \"tf_token\"]}"
+refuse 'secret_variables has names the container sets itself: PATH' "{\"name\": \"acme\", $box, \"secret_variables\": [\"PATH\"]}"
+refuse 'repos has entries that are not a repository (a name, or owner/name): https://github.com/acme/web' "{\"name\": \"acme\", $box, \"repos\": [\"https://github.com/acme/web\"]}"
+refuse 'repos has more than one repository named web, which would share one clone' "{\"name\": \"acme\", $box, \"repos\": [\"web\", \"acme/web\"]}"
+refuse 'start_script is the script itself, as text' "{\"name\": \"acme\", $box, \"start_script\": [\"service postgresql start\"]}"
+refuse 'would all be stored as nucarium-env-a-b-c' '{"name": "a-b", "runtime": "container", "config_dir": "/home/agent/.claude-ab", "secret_variables": ["C"]}, {"name": "a", "runtime": "container", "config_dir": "/home/agent/.claude-a", "secret_variables": ["B_C"]}'
+refuse 'environment acme: secret_variables lists TF_TOKEN, and secrets.environments.acme.TF_TOKEN has no value' "{\"name\": \"acme\", $box, \"secret_variables\": [\"TF_TOKEN\"]}"
+# shellcheck disable=SC2016  # the ${#x} is the script's, not this one's
+refuse 'environment acme: start_script has {{, {% or {# in it' "{\"name\": \"acme\", $box, \"start_script\": \"n=\${#x}\"}"
 
 # A login a container environment has used is never used on the host again.
 logins=out/render-logins

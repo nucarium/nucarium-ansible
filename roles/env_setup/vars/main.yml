@@ -3,7 +3,9 @@
 # environment: setup.sh is root's alone (0700); variables.sh is readable by
 # the agent user, whose session hook reads it. Beside them, runtime (host or
 # container), and for a container environment image.env and network.env,
-# what its image is built from besides the script (tasks/container.yml). A
+# what its image is built from besides the script (tasks/container.yml), its
+# start script (start.sh, readable by all), and with a GitHub identity of its
+# own its Git settings and signing key (box/, the env_runtime role). A
 # container environment has the folder mounted read-only.
 env_setup_etc_dir: /etc/nucarium/environments
 # What each environment is (<name>.json, written here) and how its setup
@@ -24,12 +26,13 @@ env_setup_build_dir: /var/lib/nucarium/env-build
 
 # <name>.json for one environment (the loop variable env). Counts, never
 # values: Watch is told how many variables and hosts there are, not what they
-# are. The repositories are the box's, under their GitHub names, at most 32.
+# are. The repositories are the environment's (its own repos, else the
+# box's), under their GitHub names, at most 32.
 # Network secrets are a later step, so there are none yet.
 env_setup_summary:
   network: "{{ env_network }}"
   allowed_hosts: "{{ env_allowed_hosts | length if env_network == 'limited' else 0 }}"
-  repos: "{{ (repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | list)[:32] }}"
+  repos: "{{ (env_repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | list)[:32] }}"
   variables: "{{ env_variables | length }}"
   secrets: 0
   setup_script: "{{ env_setup_script | length > 0 }}"

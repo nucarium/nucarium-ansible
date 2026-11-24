@@ -7,11 +7,15 @@
 # value with ${#arr[@]} or --format '{{.Names}}' in it would stop every run
 # with an error about template syntax. Each is tried on its own first, so the
 # message can say which one to mark !unsafe.
+#
+# repos, secret_variables, github and start_script are a container
+# environment's alone: on the host every environment shares the box's
+# repositories, GitHub App and identity.
 - name: Try each environment's script, variables and hosts as Ansible reads them
   ansible.builtin.assert:
     that: environments[item.0][item.1] | default('') | to_json | length > 0
     quiet: true
-  loop: "{{ range(environments | length) | product(['setup_script', 'variables', 'allowed_hosts', 'network', 'runtime']) | list }}"
+  loop: "{{ range(environments | length) | product(['setup_script', 'start_script', 'variables', 'allowed_hosts', 'network', 'runtime', 'repos', 'secret_variables', 'github']) | list }}"
   loop_control:
     label: "{{ environments[item.0].name | default(item.0 + 1) }}: {{ item.1 }}"
   register: env_templated
@@ -28,16 +32,28 @@
       the one variable's value, as in NAME: !unsafe '{{ '{{' }}.Names}}'.
   when: env_templated.results | select('failed') | list | length > 0
 
-- name: Check each environment's runtime, network, variables and setup script
+- name: Check each environment's runtime, network, variables and scripts
   ansible.builtin.fail:
     msg: >-
       group_vars/all.yml: environment {{ env.name | default(ansible_loop.index) }}:
       {{ 'is not a set of keys such as name: and capacity:' if env is not mapping else env_problems | join('; ') }}.
   when: env is not mapping or env_problems | length > 0
   vars:
-    env_known_keys: [name, config_dir, capacity, runtime, network, allowed_hosts, variables, setup_script]
+    env_known_keys: [name, config_dir, capacity, runtime, network, allowed_hosts, variables, setup_script, repos, secret_variables, github, start_script]
+    # The keys only an environment with runtime: container may have.
+    env_container_only: "{{ ['repos', 'secret_variables', 'github', 'start_script'] | select('in', env.keys() | list) | list }}"
     # A shell variable name, as bash takes it after `export`.
     env_variable_name: '^[A-Za-z_][A-Za-z0-9_]*$'
+    # An entry of repos, as the box's repos takes it: a name, or owner/name.
+    env_repo: '^([A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+$'
+    env_repo_names: "{{ env.repos | select('string') | map('basename') | list if env.repos is defined and env.repos is sequence and env.repos is not string and env.repos is not mapping else [] }}"
+    # The variables the container's unit sets itself, which a secret
+    # variable of the same name would take the place of.
+    env_unit_variables: [HOME, PATH, CLAUDE_CONFIG_DIR, DISABLE_AUTOUPDATER, NUCLEATE_CONFIG, NUCLEATED_CONFIG, NPM_CONFIG_GLOBALCONFIG,
+                         http_proxy, https_proxy, HTTP_PROXY, HTTPS_PROXY, no_proxy, NO_PROXY, NODE_USE_ENV_PROXY]
+    env_secret_names: "{{ env_secret_variables | map('string') | list if env_secret_variables is sequence and env_secret_variables is not string and env_secret_variables is not mapping else [] }}"
+    # An address git takes as user.email: no spaces, quotes or <>.
+    env_email: '^[^\s@<>"]+@[^\s@<>"]+$'
     # A host, a *.wildcard or an address, with an optional :port. Nothing that
     # is not part of a host name.
     env_host: '^[^\s"''\\,;/]+$'
@@ -64,9 +80,37 @@
             + (['variables has names that are not shell variable names (letters, digits and _, not starting with a digit): ' ~ (env_variables.keys() | map('string') | reject('match', env_variable_name) | join(', '))] if env_variables.keys() | map('string') | reject('match', env_variable_name) | list else [])
             + (['variables has values that are not quoted text: ' ~ (env_variables | dict2items | rejectattr('value', 'string') | map(attribute='key') | sort | join(', ')) ~ ' (quote every value, as in NAME: "3.10": unquoted, YAML turns 3.10 into 3.1, 0755 into 493 and yes into true)'] if env_variables | dict2items | rejectattr('value', 'string') | list else []))
       + (['setup_script is the script itself, as text (write setup_script: | and the script below it)'] if env_setup_script is not string else [])
+      + (env_container_only | map('regex_replace', '$', ' needs runtime: container, and runtime is ' ~ env_runtime) | list if env_runtime != 'container' else [])
+      + ([] if env.repos is not defined
+         else (['repos is a list of repositories, one per line (a name, or owner/name), and is ' ~ (env.repos | type_debug)] if env.repos is string or env.repos is mapping or env.repos is not sequence
+         else (['repos has entries that are not a repository (a name, or owner/name): ' ~ ((env.repos | reject('string') | map('string') | list) + (env.repos | select('string') | reject('match', env_repo) | list)) | join(', ')] if env.repos | reject('string') | list or env.repos | select('string') | reject('match', env_repo) | list else [])
+            + (['repos has more than one repository named ' ~ (env_repo_names | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | join(', ')) ~ ', which would share one clone'] if env_repo_names | unique | list | length != env_repo_names | length else [])))
+      + (['secret_variables is a list of variable names, one per line, and is ' ~ (env_secret_variables | type_debug)] if env_secret_variables is string or env_secret_variables is mapping or env_secret_variables is not sequence
+         else (['secret_variables has names that are not shell variable names (letters, digits and _, not starting with a digit): ' ~ (env_secret_names | reject('match', env_variable_name) | join(', '))] if env_secret_names | reject('match', env_variable_name) | list else [])
+            + (['secret_variables has names that are also in variables: ' ~ (env_secret_names | select('in', env_variables.keys() | map('string') | list) | join(', ')) ~ ' (a variable is either plain or secret)'] if env_variables is mapping and env_secret_names | select('in', env_variables.keys() | map('string') | list) | list else [])
+            + (['secret_variables names a variable more than once, or two whose names differ only in case: ' ~ (env_secret_names | map('lower') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | join(', '))] if env_secret_names | map('lower') | unique | list | length != env_secret_names | length else [])
+            + (['secret_variables has names the container sets itself: ' ~ ((env_secret_names | select('in', env_unit_variables) | list) + (env_secret_names | select('match', '^AGENT_SERVER_') | list)) | join(', ')] if env_secret_names | select('in', env_unit_variables) | list or env_secret_names | select('match', '^AGENT_SERVER_') | list else []))
+      + ([] if env.github is not defined
+         else (['github is the environment' ~ "'" ~ 's Git identity, name: and email: (an address, such as dev@example.com), and nothing else'] if env.github is not mapping or env.github.keys() | map('string') | sort != ['email', 'name'] or env.github.name is not string or env.github.email is not string or env.github.name | trim | length == 0 or env.github.name is search('[\n<>]') or env.github.email is not match(env_email) else [])
+            + (['github needs GITHUB_TOKEN in secret_variables: the environment' ~ "'" ~ 's Git credential helper answers with that token'] if 'GITHUB_TOKEN' not in env_secret_names else []))
+      + (['start_script is the script itself, as text (write start_script: | and the script below it)'] if env_start_script is not string else [])
       }}
   loop: "{{ environments }}"
   loop_control:
     loop_var: env
     label: "{{ env.name | default(env) }}"
     extended: true
+
+# Each secret variable is the agent user's Podman secret named after the
+# environment and the variable (nucarium_env_secrets, vars/runtime.yml), and
+# an environment's name may have a - in it: environment a-b's B and
+# environment a's B_B would both be nucarium-env-a-b-b.
+- name: Check no two environments' secret variables share a Podman secret
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml: the secret variables
+      {{ nucarium_env_secrets | selectattr('secret', 'in', env_shared) | map(attribute='env') | zip(nucarium_env_secrets | selectattr('secret', 'in', env_shared) | map(attribute='name')) | map('join', ': ') | join(', ') }}
+      would all be stored as {{ env_shared | join(', ') }}: rename one of them, or one of the environments.
+  when: env_shared | length > 0
+  vars:
+    env_shared: "{{ nucarium_env_secrets | map(attribute='secret') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | list }}"

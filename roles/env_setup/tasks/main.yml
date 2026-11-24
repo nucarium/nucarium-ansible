@@ -118,6 +118,33 @@
     label: "{{ env.name }}"
   register: env_setup_scripts
 
+# A container environment's start script, which its agent server runs as
+# root inside the container at each start (agent-server). Readable by all:
+# the container's root is the agent user on the box, and it is not secret.
+# It is no part of the image, so a change reaches the container at its next
+# start, with no build.
+- name: Store each container environment's start script
+  ansible.builtin.copy:
+    content: "{{ env_start_script }}"
+    dest: "{{ env_setup_etc_dir }}/{{ env.name }}/start.sh"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('start_script', 'defined') | selectattr('start_script') | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  register: env_setup_start_scripts
+
+- name: Remove the start script of each environment that no longer has one
+  ansible.builtin.file:
+    path: "{{ env_setup_etc_dir }}/{{ env.name }}/start.sh"
+    state: absent
+  loop: "{{ environments | rejectattr('name', 'in', env_setup_start_scripts.results | map(attribute='env.name') | list) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
 - name: Remove the setup script of each environment that no longer has one
   ansible.builtin.file:
     path: "{{ env_setup_etc_dir }}/{{ env.name }}/setup.sh"

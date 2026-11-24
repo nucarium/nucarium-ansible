@@ -45,6 +45,31 @@ read, but it has not been run end to end on real hardware.
   nothing its sessions write reaches another environment's; its files are
   the agent user's on the box, and its server shows in the
   Claude app under the environment's name.
+- **Container environments of other owners, if you want them.** Four keys
+  are for an environment with `runtime: container` only; the playbook
+  refuses each on the host. Each is left out by default, and the
+  environment then has what the box has:
+  - `repos`: its own repositories, in place of the box's `repos`, in the
+    same form. Its nucleus offers only these.
+  - `secret_variables`: the names of variables whose values are secret (a
+    Terraform token, say), set in its container and every session. The
+    values are `secrets.environments.<env>.<NAME>` in your secrets file,
+    never in `group_vars/all.yml`, and each is kept as the agent user's
+    Podman secret `nucarium-env-<env>-<name>`. Default: none.
+  - `github`: its own Git identity, `name:` and `email:`. It needs
+    `GITHUB_TOKEN` in `secret_variables`, a token of that GitHub account,
+    which its Git and `nucleate` use. The environment then signs with a key
+    of its own and uses nothing of the box's GitHub: not the GitHub App,
+    not the box's identity and key, not the packages token. Its agent
+    server clones its repositories inside the container. Default: the
+    box's identity and the GitHub App.
+  - `start_script`: a script run as root in its container each time the
+    container starts, before the agent server, for the services its setup
+    script installed. Up to five minutes; a failure does not stop the
+    server. Default: none.
+
+  With all four, one box hosts environments of unrelated owners: none sees
+  another's credentials or code.
 - **Environments set up like a cloud environment.** Each environment can
   have its own network access (none, limited or full), more hosts,
   environment variables and a setup script, which runs as root before its
@@ -173,8 +198,8 @@ Roles run in this order. Each has a tag of the same name.
 | `broker` | The GitHub App key and the timer that mints a fresh GitHub token every 20 minutes; the HCP Terraform token if used |
 | `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, the paths it may write, and the hosts its environment's `network` allows; off in a container, which is the boundary there), update channel, deny rules, the session hook (GitHub token and the environment's variables, root's, in `/usr/local/lib/nucarium/session-env.sh`) and the `nucleated hook` entries. Also your `agent-context/` files |
 | `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server for each login on the host. For each container environment, its own nucleus, `~/workspace-<name>`, made and cloned on the host only while it is new, with its `.claude/`, `AGENTS.md`, `CLAUDE.md` and `.mcp.json` |
-| `env_runtime` | For environments with `runtime: container`: their base image, Ubuntu 24.04 with what a Claude Code cloud session has, for root, built by the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and the pins in `group_vars/all.yml` as `localhost/nucarium-base:<hash>`, and tagged `:current`, built again only when the Containerfile or a pin changes; each one's two networks and its proxy; the builder of their images (`nucarium-env-build`, with the agent user's units `nucarium-env-build@<name>` and `nucarium-env-check@<name>`); and the box's Git identity, signing key and packages token as the containers see them, root's, in `/etc/nucarium/box/`. Does nothing on a box with no such environment. Runs before `env_setup` |
-| `env_setup` | Each environment's variables, setup script and runtime, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which records how the script went in `/var/lib/nucarium/environments/<name>.setup.json` and never restarts an agent server. On the host it runs the script at boot and whenever it changes. In a container it builds the environment's image, `localhost/nucarium-env-<name>`, from its base image and script, on its network, whenever one of them, the variables or the network changes, and at boot does nothing when the image is up to date. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
+| `env_runtime` | For environments with `runtime: container`: their base image, Ubuntu 24.04 with what a Claude Code cloud session has, for root, built by the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and the pins in `group_vars/all.yml` as `localhost/nucarium-base:<hash>`, and tagged `:current`, built again only when the Containerfile or a pin changes; each one's two networks and its proxy; the builder of their images (`nucarium-env-build`, with the agent user's units `nucarium-env-build@<name>` and `nucarium-env-check@<name>`); and the box's Git identity, signing key and packages token as the containers see them, root's, in `/etc/nucarium/box/`, or an environment's own identity and signing key in `/etc/nucarium/environments/<name>/box/`; and each one's secret variables, as the agent user's Podman secrets. Does nothing on a box with no such environment. Runs before `env_setup` |
+| `env_setup` | Each environment's variables, setup script, start script, repository list and runtime, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which records how the script went in `/var/lib/nucarium/environments/<name>.setup.json` and never restarts an agent server. On the host it runs the script at boot and whenever it changes. In a container it builds the environment's image, `localhost/nucarium-env-<name>`, from its base image and script, on its network, whenever one of them, the variables or the network changes, and at boot does nothing when the image is up to date. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
 | `agent_servers` | One agent server per entry in `environments`, under one shared memory cap: on the host `agent-server@<name>.service`, which waits while its environment's setup script runs; in a container `agent-env-<name>.service`, a quadlet unit, root's, that starts the environment's image with its own nucleus and the box's tools mounted, and never the shared nucleus. Only the unit of an environment's `runtime` is enabled, the two never run at once, and a switch takes effect when the running one stops by itself. Enabled, not started |
 | `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token, the configuration its hook reads inside a container (`~/.config/nucleated-hook/`, no token), and, with a container environment, its check of each repository's git config enforced. Also the two jobs the daemon does not own: a weekly cleanup of container images (the environments' old image tags included), the pnpm store and the journal, and the nightly encrypted backup if configured |
 
@@ -277,6 +302,7 @@ what a real run would do.
 | Change what one environment's sessions can reach | `network` or `allowed_hosts` in `environments` | `--tags claude,env_setup`; new sessions see it. In a container, `--tags env_runtime,env_setup`: its proxy applies it at once, and its image is built again |
 | Set an environment's variables | `variables` in `environments` | `--tags env_setup`; new sessions see them. In a container its image is built again too |
 | Add or change an environment's setup script | `setup_script` in `environments` | `--tags env_setup`; the script runs at once, and no agent server is restarted. In a container, `--tags env_runtime,env_setup`: the image is built again, and the server takes it up at its next start |
+| Give a container environment its own repositories, secret variables, GitHub identity or start script | `repos`, `secret_variables`, `github` or `start_script` on the environment, and the values of its secret variables in your secrets file | `--tags env_runtime,env_setup,workspace,agent_servers`; the container takes them up at its next start. With a new `github`, register its signing key as the closing message says |
 | Follow a repository to another Playwright | `playwright_version` | `--tags cloud_parity`, and `env_runtime` too if an environment runs in a container |
 | Run an environment in its own container, or back on the host | `runtime` on the environment (a container one needs its own `config_dir`) | `--tags env_runtime,env_setup,claude,workspace,agent_servers,day2`. The first build of the base image takes a while. The switch takes effect when the running server stops by itself, or when you restart it; never while a session runs. The first time, sign it in by hand (the closing message says how) |
 | Add a second Claude login | `environments` | `--tags claude,workspace,env_setup,agent_servers,day2`, then sign it in and start it by hand |
@@ -345,7 +371,12 @@ committed to your copy of it.
   `secret_refs` in `group_vars/all.yml` holds references to them
   (`op://vault/item/field`), which are safe to commit. A playbook reads the
   values on your workstation with `op read` as it runs, keeps them in memory,
-  and never logs them.
+  and never logs them. The values of container environments' secret variables are the
+  exception: they are `secrets.environments.<env>.<NAME>` in a file of
+  secrets you give the playbook (`-e @secrets.yml`, an Ansible Vault file for
+  instance), and the playbook stops before it changes anything when one is
+  missing. A `secrets` given this way takes the place of what `secret_refs`
+  reads, so that file holds the box's other secrets too.
 - **What a playbook writes on your workstation.** Only `out/`, which git
   ignores: `out/cidata/` holds the unattended-install answers, with your
   password's hash and the disk passphrase in the clear, and
@@ -359,7 +390,11 @@ committed to your copy of it.
   environment has it in `/etc/nucarium/box/npmrc` for npm and as the agent
   user's Podman secret `nucarium-npm-token`, which every process in the
   container gets as `NODE_AUTH_TOKEN` for pnpm. Sessions on the host get
-  `NODE_AUTH_TOKEN` too. The Watch machine
+  `NODE_AUTH_TOKEN` too. A container environment's secret variables are
+  each the agent user's Podman secret `nucarium-env-<env>-<name>`, given
+  to that environment's container only; an environment with a GitHub
+  identity of its own also has its own signing key, in
+  `/etc/nucarium/environments/<env>/box/`, and none of the box's tokens. The Watch machine
   token is in `~agent/.config/nucleated/token`, written by `nucleate login`.
   The notifier's token, if you gave one, is beside it in `notify-token`,
   mode 600, and is left out of the nightly backup.

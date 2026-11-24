@@ -1,10 +1,11 @@
-# The box's Git settings, as every container environment sees them: the
-# base image's /root/.gitconfig includes this file. Written by the Nucarium
-# box recipe from group_vars/all.yml; the next run rewrites it. A setup script
-# may add its own to /root/.gitconfig, and those stay in force.
+# The Git settings of {{ env_runtime_git_for }}.
+# The base image's /root/.gitconfig includes this file, which the container
+# has at {{ nucarium_box_dir }}/gitconfig. Written by the Nucarium box recipe
+# from group_vars/all.yml; the next run rewrites it. A setup script may add
+# its own to /root/.gitconfig, and those stay in force.
 [user]
-	name = {{ git_user_name | to_json(ensure_ascii=false) }}
-	email = {{ git_user_email | to_json(ensure_ascii=false) }}
+	name = {{ env_runtime_git_identity.name | to_json(ensure_ascii=false) }}
+	email = {{ env_runtime_git_identity.email | to_json(ensure_ascii=false) }}
 	signingkey = {{ nucarium_box_dir }}/signing.pub
 [gpg]
 	format = ssh
@@ -13,4 +14,4 @@
 [tag]
 	gpgsign = true
 [credential "https://github.com"]
-	helper = {{ nucarium_git_credential_helper | to_json(ensure_ascii=false) }}
+	helper = {{ env_runtime_git_helper | to_json(ensure_ascii=false) }}

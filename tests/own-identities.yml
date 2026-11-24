@@ -1,0 +1,119 @@
+---
+# A fourth shape to render: three container environments beside one on the
+# host. acme belongs to another owner: its own repositories, secret
+# variables, GitHub identity, npm token and start script. tools has its own
+# repositories and a secret variable, and the box's GitHub App and npm
+# token. docs has the box's repositories and GitHub App, and an npm token of
+# its own in place of the box's. The start script holds text Ansible would
+# read as a template, so it is marked !unsafe.
+nucleate_version: "0.7.0"
+# Stand-ins for the secrets file the playbook is given (-e @secrets.yml).
+secrets:
+  npm_token: render-only
+  environments:
+    acme:
+      GITHUB_TOKEN: render-only-github
+      TF_TOKEN: render-only-terraform
+      NODE_AUTH_TOKEN: render-only-npm
+    tools:
+      API_KEY: render-only-key
+    docs:
+      NODE_AUTH_TOKEN: render-only-docs-npm
+environments:
+  - name: main
+  - name: acme
+    config_dir: /home/agent/.claude-acme
+    runtime: container
+    repos:
+      - acme/web
+      - acme/api
+    variables:
+      NODE_ENV: development
+    secret_variables:
+      - GITHUB_TOKEN
+      - TF_TOKEN
+      - NODE_AUTH_TOKEN
+    github:
+      name: Acme Agent
+      email: agent@example.com
+    start_script: !unsafe |
+      service postgresql start
+      services=(postgresql)
+      echo "${#services[@]} started"
+  - name: tools
+    config_dir: /home/agent/.claude-tools
+    runtime: container
+    repos:
+      - other-org/tools
+    secret_variables:
+      - API_KEY
+  - name: docs
+    config_dir: /home/agent/.claude-docs
+    runtime: container
+    secret_variables:
+      - NODE_AUTH_TOKEN
+
+# The environments that run in a container.
+render_expected_container_envs: [acme, tools, docs]
+
+# Each container unit's Secret= lines, word for word.
+render_expected_secrets:
+  acme:
+    - Secret=nucarium-env-acme-github-token,type=env,target=GITHUB_TOKEN
+    - Secret=nucarium-env-acme-tf-token,type=env,target=TF_TOKEN
+    - Secret=nucarium-env-acme-node-auth-token,type=env,target=NODE_AUTH_TOKEN
+  tools:
+    - Secret=nucarium-npm-token,type=env,target=NODE_AUTH_TOKEN
+    - Secret=nucarium-env-tools-api-key,type=env,target=API_KEY
+  docs:
+    - Secret=nucarium-env-docs-node-auth-token,type=env,target=NODE_AUTH_TOKEN
+
+# The repositories each container environment's server clones.
+render_expected_repos:
+  acme:
+    - https://github.com/acme/web.git
+    - https://github.com/acme/api.git
+  tools:
+    - https://github.com/other-org/tools.git
+  docs:
+    - https://github.com/your-org/web.git
+    - https://github.com/your-org/api.git
+
+# The Git identity of each environment that has its own.
+render_expected_identities:
+  acme: [Acme Agent, agent@example.com]
+
+# The start script each stores, character for character.
+render_expected_start_scripts:
+  acme: !unsafe "service postgresql start\nservices=(postgresql)\necho \"${#services[@]} started\"\n"
+
+# What each environment's summary must say, word for word.
+render_expected_summaries:
+  main:
+    network: limited
+    allowed_hosts: 0
+    repos: [your-org/web, your-org/api]
+    variables: 0
+    secrets: 0
+    setup_script: false
+  acme:
+    network: limited
+    allowed_hosts: 0
+    repos: [acme/web, acme/api]
+    variables: 1
+    secrets: 0
+    setup_script: false
+  tools:
+    network: limited
+    allowed_hosts: 0
+    repos: [other-org/tools]
+    variables: 0
+    secrets: 0
+    setup_script: false
+  docs:
+    network: limited
+    allowed_hosts: 0
+    repos: [your-org/web, your-org/api]
+    variables: 0
+    secrets: 0
+    setup_script: false

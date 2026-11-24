@@ -42,9 +42,26 @@ while setup_pending; do
   sleep 5
 done
 
-# A repository added to the box's settings after the container's own nucleus
-# was made is cloned here, inside the container: the host runs no git in
-# this nucleus but nucleated's, which checks each repository first.
+# In a container, the environment's start script (start_script), as root, at
+# each start of the container: a setup script runs once, when the image is
+# built, so what it starts (a database server, say) is not running here
+# until this starts it. Up to five minutes, its output in this pane; one
+# that fails or runs too long does not hold the server back.
+if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && [ -r "${AGENT_SERVER_START:-}" ]; then
+  echo "Running the start script."
+  start_status=0
+  (cd /root && timeout --kill-after=10 300 bash "$AGENT_SERVER_START" < /dev/null) || start_status=$?
+  if [ "$start_status" -ne 0 ]; then
+    echo "The start script failed (exit code $start_status); the agent server starts anyway."
+  fi
+fi
+
+# A repository added to the environment's list (its repos, else the box's)
+# after the container's own nucleus was made is cloned here, inside the
+# container: the host runs no git in this nucleus but nucleated's, which
+# checks each repository first. With a GitHub identity of its own, every
+# repository is cloned here, with the environment's own token: the host has
+# none for them.
 if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && [ -r "${AGENT_SERVER_REPOS:-}" ]; then
   while read -r url; do
     [ -n "$url" ] || continue

@@ -8,8 +8,14 @@
 # and HOME=/root.
 if [ -n "$CLAUDE_ENV_FILE" ]; then
   cat >> "$CLAUDE_ENV_FILE" <<'ENVEOF'
-export GH_TOKEN="$(cat /run/agent-tokens/github 2>/dev/null)"
-export GITHUB_TOKEN="$GH_TOKEN"
+# The GitHub App's token when it can be read; else, in a container
+# environment, its own GITHUB_TOKEN, a secret variable, as GH_TOKEN too.
+if [ -r /run/agent-tokens/github ] || [ -z "${GITHUB_TOKEN:-}" ]; then
+  export GH_TOKEN="$(cat /run/agent-tokens/github 2>/dev/null)"
+  export GITHUB_TOKEN="$GH_TOKEN"
+else
+  export GH_TOKEN="$GITHUB_TOKEN"
+fi
 # As in a Claude Code cloud session (the cloud_parity role installs these).
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export CHROME_PATH=/usr/bin/google-chrome

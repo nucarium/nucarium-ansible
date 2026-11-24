@@ -79,9 +79,11 @@ github_app_installation_id: "12345678"
 # agent server (Claude Code's Remote Control server) over the nucleus, shown
 # as one environment in Nucarium Watch. Most boxes have one. Add an entry to
 # run a second login of the same organisation on this box. Environments on
-# one box are not isolated from each other: they share the agent user, the
-# nucleus, its repositories and the GitHub App. Work for a different
-# organisation belongs on its own box.
+# the host are not isolated from each other: they share the agent user, the
+# nucleus, its repositories and the GitHub App. A container environment
+# (runtime: container) can have repositories, secrets and a GitHub identity
+# of its own, below, so that it can belong to another owner: the others
+# cannot see its credentials or its code.
 #
 #   name        A short label: lower-case letters, digits and hyphens. It
 #               names the service (agent-server@<name>, or agent-env-<name>
@@ -162,10 +164,10 @@ github_app_installation_id: "12345678"
 #                  image change), as a cloud environment's does: with the
 #                  environment's variables and network, and without the
 #                  nucleus. What it writes, /root included, is in every
-#                  session; what it starts is not running, so a session
-#                  starts its own services. Its output is in the agent
-#                  user's journal (journalctl --user -u
-#                  nucarium-env-build@<name>).
+#                  session; what it starts is not running, which is what
+#                  start_script is for. Its output is in the agent user's
+#                  journal (journalctl --user -u nucarium-env-build@<name>).
+#                  It does not get the secret variables.
 #
 # Ansible reads {{, {% and {# in a value as a template, and a script often
 # has them: ${#list[@]}, or docker ps --format '{{.Names}}'. Write !unsafe
@@ -190,6 +192,71 @@ github_app_installation_id: "12345678"
 #       packages=(libvips-dev jq)
 #       echo "Installing ${#packages[@]} packages"
 #       apt-get install -y --no-install-recommends "${packages[@]}"
+#
+# A container environment can also have these, which a host environment
+# cannot (the playbook refuses them there). Left out, it uses the box's:
+#
+#   repos            Its own repositories, in place of the box's repos, in
+#                    the same form: a bare name is in github_org, owner/name
+#                    names its owner. Its nucleus offers only these.
+#   secret_variables Names of variables whose values are secret, one per
+#                    line, set in its container, its agent server and every
+#                    session (a Terraform token, say). The values are not
+#                    in this file: each is secrets.environments.<env>.<NAME>
+#                    in the file of secrets you give the playbook
+#                    (-e @secrets.yml), and the playbook stops, changing
+#                    nothing, when one has none. A secrets given this way
+#                    takes the place of what secret_refs reads, so the file
+#                    holds the box's other secrets too. Each is kept as the agent
+#                    user's Podman secret nucarium-env-<env>-<name>. A name
+#                    may not also be in variables. Not in the image: the
+#                    setup script does not get them.
+#   github           Its own GitHub identity: name: and email:, for its
+#                    commits. It needs GITHUB_TOKEN in secret_variables,
+#                    a token of that GitHub account, which its Git uses for
+#                    github.com and nucleate for pull requests. With it, the
+#                    environment uses nothing of the box's GitHub: not the
+#                    GitHub App, not git_user_name and its signing key, not
+#                    the packages token (list NODE_AUTH_TOKEN in
+#                    secret_variables for one of its own). It signs its
+#                    commits with a key of its own, made once on the box;
+#                    the playbook copies its public half to
+#                    out/<box>-<env>-signing.pub, and the closing message
+#                    says how to register it on that account. The host clones
+#                    none of its repositories: its agent server clones them,
+#                    in the container, at its first start.
+#   start_script     A bash script, run as root in /root in its container
+#                    each time the container starts, before the agent server:
+#                    for the services the setup script installed (a database
+#                    server, say), which are not running otherwise. Up to five
+#                    minutes; its output is in the server's tmux session,
+#                    and one that fails still lets the server start.
+#
+# Changing these needs `--tags env_runtime,env_setup,workspace,agent_servers`;
+# the container takes them up at its next start. For example:
+#
+#   - name: acme
+#     config_dir: /home/agent/.claude-acme
+#     runtime: container
+#     repos:
+#       - acme/web
+#       - other-org/tools
+#     secret_variables:
+#       - GITHUB_TOKEN
+#       - TF_TOKEN
+#     github:
+#       name: Acme Agent
+#       email: agent@example.com
+#     start_script: |
+#       service postgresql start
+#
+# with, in the secrets file:
+#
+#   secrets:
+#     environments:
+#       acme:
+#         GITHUB_TOKEN: "..."
+#         TF_TOKEN: "..."
 environments:
   - name: main
     capacity: 12

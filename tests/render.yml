@@ -5,6 +5,7 @@
 #   ansible-playbook tests/render.yml
 #   ansible-playbook tests/render.yml -e @tests/two-logins.yml
 #   ansible-playbook tests/render.yml -e @tests/three-networks.yml
+#   ansible-playbook tests/render.yml -e @tests/own-identities.yml
 - name: Render the templates locally
   hosts: boxes
   connection: local
@@ -32,6 +33,11 @@
     env_allowed_hosts: "{{ env.allowed_hosts | default([], true) }}"
     env_variables: "{{ env.variables | default({}, true) }}"
     env_setup_script: "{{ env.setup_script | default('', true) }}"
+    env_repos: "{{ env.repos if env.repos is defined else repos }}"
+    env_secret_variables: "{{ env.secret_variables | default([], true) }}"
+    env_github: "{{ env.github | default({}, true) }}"
+    env_start_script: "{{ env.start_script | default('', true) }}"
+    env_box_dir: "{{ nucarium_env_box_dir if env_github else nucarium_box_dir }}"
     env_unit: "{{ 'agent-env-' ~ env.name ~ '.service' if env_runtime == 'container' else 'agent-server@' ~ env.name ~ '.service' }}"
     env_nucleus: "{{ agent_home ~ '/workspace-' ~ env.name if env_runtime == 'container' else nucleus_root }}"
     watch_console_url: https://app.nucarium.com
@@ -53,6 +59,8 @@
         dest: nucleate.toml
       - src: ../roles/env_setup/templates/repos.j2
         dest: repos
+    # The container environments with a GitHub identity of their own.
+    render_identity_envs: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('github', 'defined') | list }}"
     # Where the env_runtime role's files are, which its vars read.
     env_runtime_role_dir: "{{ playbook_dir }}/../roles/env_runtime"
     # Stand-ins for values the real run reads from the box.
@@ -63,6 +71,9 @@
     # playbook with entries it must refuse.
     - name: Check each environment's settings
       ansible.builtin.import_tasks: ../tasks/check-environments.yml
+
+    - name: Check each container environment's secret variables have values
+      ansible.builtin.import_tasks: ../tasks/check-secret-variables.yml
 
     - name: Check the logins of container environments
       ansible.builtin.import_tasks: ../tasks/check-container-logins.yml
@@ -357,7 +368,7 @@
           - render_summary.network == env_network
           - render_summary.allowed_hosts is integer and render_summary.allowed_hosts is not boolean
           - render_summary.allowed_hosts == (env_allowed_hosts | length if env_network == 'limited' else 0)
-          - render_summary.repos == repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | list
+          - render_summary.repos == env_repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | list
           - render_summary.variables is integer and render_summary.variables is not boolean
           - render_summary.variables == env_variables | length
           - render_summary.secrets == 0 and render_summary.secrets is not boolean
@@ -450,18 +461,25 @@
           - render_text is not search(render_shared)
           - "('ExecStartPre=/usr/local/lib/nucarium/agent-env-start ' ~ env.name ~ ' ' ~ render_nucleus ~ ' %t/agent-env-' ~ env.name ~ '.volumes') in render_lines"
           - render_env.NUCLEATED_CONFIG == agent_home ~ '/.config/nucleated-hook/config.toml'
-          - render_env.NPM_CONFIG_GLOBALCONFIG == '/etc/nucarium/box/npmrc'
-          # The npm token as NODE_AUTH_TOKEN, from a Podman secret, only on a
-          # box with one.
-          - render_lines | select('match', 'Secret=') | list == (['Secret=' ~ nucarium_npm_secret ~ ',type=env,target=NODE_AUTH_TOKEN'] if secrets.npm_token is defined else [])
+          # The box's npm settings, but not for an environment with a GitHub
+          # identity of its own, which has none of the box's.
+          - render_env.NPM_CONFIG_GLOBALCONFIG | default('') == ('' if env_github else '/etc/nucarium/box/npmrc')
+          # The variables from Podman secrets: the box's npm token as
+          # NODE_AUTH_TOKEN, only on a box with one; with secret variables,
+          # the lines render_expected_secrets lists, word for word.
+          - render_expected_secrets is defined or render_lines | select('match', 'Secret=') | list == (['Secret=' ~ nucarium_npm_secret ~ ',type=env,target=NODE_AUTH_TOKEN'] if secrets.npm_token is defined else [])
+          - render_expected_secrets is not defined or render_lines | select('match', 'Secret=') | list == render_expected_secrets[env.name]
+          # With a GitHub identity of its own, nothing of the GitHub App.
+          - not env_github or render_text is not search('/run/agent-tokens')
+          - render_env.AGENT_SERVER_START == '/etc/nucarium/environments/' ~ env.name ~ '/start.sh'
           - render_env.AGENT_SERVER_RUNTIME == 'container'
           - render_env.AGENT_SERVER_NAME == env.name
           - render_env.AGENT_SERVER_ROOT == '/etc/nucarium/servers/' ~ env.name
           - render_env.AGENT_SERVER_PREFIX == inventory_hostname ~ '-' ~ env.name
           - render_env.AGENT_SERVER_CAPACITY == env.capacity | default(12) | string
           - render_env.AGENT_SERVER_COMMAND == agent_home ~ '/.local/bin/agent-server'
-          - render_volumes | map('split', ':') | map('first') | list == render_volumes | map('split', ':') | map(attribute=1) | list
-          - render_volumes | map('split', ':') | map('first') | list == render_mounts | map('last') | list
+          - render_volumes | map('split', ':') | map('first') | list == render_mounts | map(attribute=1) | list
+          - render_volumes | map('split', ':') | map(attribute=1) | list == render_mounts | map('last') | list
           - render_volumes | map('split', ':') | map('last') | map('regex_replace', '^/.*$', 'rw') | list == render_mounts | map('first') | list
           - render_volumes | map('split', ':') | map(attribute=1) | select('match', '^/root(/|$)') | list == []
           - "'PodmanArgs=$NUCARIUM_HOOK_VOLUMES' in render_lines"
@@ -495,26 +513,30 @@
         render_image_path: >-
           {{ lookup('ansible.builtin.file', env_runtime_role_dir ~ '/files/base/Containerfile')
           | regex_search('(?m)^ENV PATH=(\S+)', '\1') | first | replace('${NODE_VERSION}', node_version) }}
-        # Each mount's host path, and how it is mounted, in order.
-        render_mounts:
-          - [rw, "{{ render_nucleus }}"]
-          - [rw, "{{ render_nucleus }}/.repos"]
-          - [rw, "{{ render_nucleus }}/.worktrees"]
-          - [ro, "{{ render_nucleus }}/.claude"]
-          - [ro, "{{ render_nucleus }}/.seeds"]
-          - [ro, "{{ render_nucleus }}/.mcp.json"]
-          - [ro, "{{ render_nucleus }}/AGENTS.md"]
-          - [ro, "{{ render_nucleus }}/CLAUDE.md"]
-          - [rw, "{{ env.config_dir | default('') }}"]
-          - [ro, "{{ agent_home }}/.local/share/claude"]
-          - [ro, "{{ agent_home }}/.local/bin"]
-          - [ro, "{{ agent_home }}/.config/nucleated-hook"]
-          - [rw, "{{ agent_home }}/.local/state/nucleated/spool"]
-          - [ro, /run/agent-tokens]
-          - [ro, "/etc/nucarium/environments/{{ env.name }}"]
-          - [ro, /usr/local/lib/nucarium]
-          - [ro, /etc/nucarium/box]
-          - [ro, "/etc/nucarium/servers/{{ env.name }}"]
+        # Each mount: how it is mounted, its host path and its path in the
+        # container, in order. All at their host paths but the Git settings
+        # of an environment with a GitHub identity of its own, which are its
+        # own folder at the box's path; such an environment has no GitHub App
+        # token.
+        render_mounts: >-
+          {{ [['rw', render_nucleus, render_nucleus],
+              ['rw', render_nucleus ~ '/.repos', render_nucleus ~ '/.repos'],
+              ['rw', render_nucleus ~ '/.worktrees', render_nucleus ~ '/.worktrees'],
+              ['ro', render_nucleus ~ '/.claude', render_nucleus ~ '/.claude'],
+              ['ro', render_nucleus ~ '/.seeds', render_nucleus ~ '/.seeds'],
+              ['ro', render_nucleus ~ '/.mcp.json', render_nucleus ~ '/.mcp.json'],
+              ['ro', render_nucleus ~ '/AGENTS.md', render_nucleus ~ '/AGENTS.md'],
+              ['ro', render_nucleus ~ '/CLAUDE.md', render_nucleus ~ '/CLAUDE.md'],
+              ['rw', env.config_dir | default(''), env.config_dir | default('')],
+              ['ro', agent_home ~ '/.local/share/claude', agent_home ~ '/.local/share/claude'],
+              ['ro', agent_home ~ '/.local/bin', agent_home ~ '/.local/bin'],
+              ['ro', agent_home ~ '/.config/nucleated-hook', agent_home ~ '/.config/nucleated-hook'],
+              ['rw', agent_home ~ '/.local/state/nucleated/spool', agent_home ~ '/.local/state/nucleated/spool']]
+          + ([] if env_github else [['ro', '/run/agent-tokens', '/run/agent-tokens']])
+          + [['ro', '/etc/nucarium/environments/' ~ env.name, '/etc/nucarium/environments/' ~ env.name],
+             ['ro', '/usr/local/lib/nucarium', '/usr/local/lib/nucarium'],
+             ['ro', '/etc/nucarium/environments/' ~ env.name ~ '/box' if env_github else '/etc/nucarium/box', '/etc/nucarium/box'],
+             ['ro', '/etc/nucarium/servers/' ~ env.name, '/etc/nucarium/servers/' ~ env.name]] }}
       loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
       loop_control:
         loop_var: env
@@ -564,15 +586,19 @@
       register: render_nucleate
       changed_when: false
 
-    - name: Check each against the environment's nucleus and the box's repositories
+    # An environment with a GitHub identity of its own names no token file:
+    # nucleate uses its GITHUB_TOKEN. One with repos of its own offers those.
+    - name: Check each against the environment's nucleus and its repositories
       ansible.builtin.assert:
         that:
-          - (item.stdout | from_json).keys() | sort == ['github_token_file', 'root']
+          - (item.stdout | from_json).keys() | sort == (['root'] if env_github else ['github_token_file', 'root'])
           - (item.stdout | from_json).root == agent_home ~ '/workspace-' ~ item.env.name
-          - (item.stdout | from_json).github_token_file == '/run/agent-tokens/github'
-          - render_repos == repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | map('regex_replace', '^(.*)$', 'https://github.com/\\1.git') | list
+          - env_github | length > 0 or (item.stdout | from_json).github_token_file == '/run/agent-tokens/github'
+          - render_repos == env_repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | map('regex_replace', '^(.*)$', 'https://github.com/\\1.git') | list
+          - render_expected_repos is not defined or render_repos == render_expected_repos[item.env.name]
         quiet: true
       vars:
+        env: "{{ item.env }}"
         render_repos: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ item.env.name ~ '.repos').split('\n') | select | list }}"
       loop: "{{ render_nucleate.results }}"
       loop_control:
@@ -673,6 +699,79 @@
       vars:
         render_git: "{{ render_gitconfig.stdout_lines | map('split', '=', 1) | items2dict(key_name=0, value_name=1) }}"
 
+    # An environment with a GitHub identity of its own: its own name, email
+    # and signing key at the box's path in its container, and a credential
+    # helper that answers with its own GITHUB_TOKEN, never the App's token.
+    # Rendered as the env_runtime role writes it.
+    - name: Render the Git settings of each environment with a GitHub identity of its own
+      ansible.builtin.template:
+        src: ../roles/env_runtime/templates/gitconfig.j2
+        dest: "{{ render_dir }}/{{ env.name }}.gitconfig"
+        mode: "0600"
+      vars:
+        env_runtime_git_for: environment {{ env.name }}, which has a GitHub identity of its own
+        env_runtime_git_identity: "{{ env.github }}"
+        env_runtime_git_helper: "{{ nucarium_env_git_credential_helper }}"
+      loop: "{{ render_identity_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.gitconfig"
+
+    - name: Read them back with git
+      ansible.builtin.command:
+        argv: [git, config, --file, "{{ render_dir }}/{{ env.name }}.gitconfig", --list]
+      loop: "{{ render_identity_envs }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.gitconfig"
+      register: render_env_gitconfig
+      changed_when: false
+
+    - name: Check them
+      ansible.builtin.assert:
+        that:
+          - render_git['user.name'] == item.env.github.name
+          - render_git['user.email'] == item.env.github.email
+          - render_expected_identities is not defined or [render_git['user.name'], render_git['user.email']] == render_expected_identities[item.env.name]
+          - render_git['user.signingkey'] == '/etc/nucarium/box/signing.pub'
+          - render_git['gpg.format'] == 'ssh'
+          - render_git['commit.gpgsign'] == 'true'
+          - render_git['tag.gpgsign'] == 'true'
+          - "'username=x-access-token' in render_git['credential.https://github.com.helper']"
+          - "'\"$GITHUB_TOKEN\"' in render_git['credential.https://github.com.helper']"
+          - "'/run/agent-tokens' not in render_git['credential.https://github.com.helper']"
+        quiet: true
+      vars:
+        render_git: "{{ item.stdout_lines | map('split', '=', 1) | items2dict(key_name=0, value_name=1) }}"
+      loop: "{{ render_env_gitconfig.results }}"
+      loop_control:
+        label: "{{ item.env.name }}.gitconfig"
+
+    # The start script as the env_setup role stores it, from the same
+    # expression: text that looks like a template is kept as written.
+    - name: Store each container environment's start script
+      ansible.builtin.copy:
+        content: "{{ env_start_script }}"
+        dest: "{{ render_dir }}/{{ env.name }}.start.sh"
+        mode: "0600"
+      loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('start_script', 'defined') | selectattr('start_script') | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.start.sh"
+
+    - name: Check each stored start script is the one in the settings
+      ansible.builtin.assert:
+        that:
+          - render_stored == env.start_script
+          - render_expected_start_scripts is not defined or render_stored == render_expected_start_scripts[env.name]
+        quiet: true
+      vars:
+        render_stored: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.start.sh', rstrip=false) }}"
+      loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('start_script', 'defined') | selectattr('start_script') | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.start.sh"
+
     # The base image's versions are group_vars/all.yml's pins and nothing
     # else: every ARG in the Containerfile is fed, none has a default of its
     # own, and each is fed the pin of its name in lower case.
@@ -717,6 +816,17 @@
         content: "{{ lookup('ansible.builtin.template', '../templates/next-steps.j2') }}"
         dest: "{{ render_dir }}/next-steps.txt"
         mode: "0600"
+
+    # It says to register each environment's own signing key, by the file the
+    # playbook copies to out/, and no such key when there is none.
+    - name: Check the closing message names each environment's own signing key
+      ansible.builtin.assert:
+        that:
+          - render_identity_envs | map(attribute='name') | map('regex_replace', '^(.*)$', 'out/' ~ inventory_hostname ~ '-\\1-signing.pub') | reject('in', render_message) | list == []
+          - render_identity_envs | length > 0 or render_message is not search('-signing[.]pub --type signing --title "' ~ inventory_hostname ~ '-')
+        quiet: true
+      vars:
+        render_message: "{{ lookup('ansible.builtin.file', render_dir ~ '/next-steps.txt') }}"
 
     - name: Record the values the roles derive
       ansible.builtin.copy:
