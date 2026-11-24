@@ -49,6 +49,24 @@ claude_sandbox_allow_write: >-
 claude_sandbox_deny_in_allowed: >-
   {{ sandbox_agent_dirs_protected | map('regex_replace', '^', '~/') | list }}
 
+# What sandboxed commands on the host may not read: what container
+# environments hold that may belong to another owner. Each one's own Git
+# settings and signing key (/etc/nucarium/environments/<name>/box/, a glob
+# the sandbox expands as a session starts, so a folder made later is
+# covered from the next session); the agent user's Podman storage, whose
+# secrets/ holds every container environment's secret variables
+# (secrets/filedriver/secretsdata.json, the agent user's rootless graph root
+# being ~/.local/share/containers/storage), and which holds their images and
+# containers too; and the nucleus and login of each container environment
+# with a GitHub identity of its own. podman and docker themselves run outside
+# the sandbox (excludedCommands), as the agent user.
+claude_sandbox_deny_read: >-
+  {{ ['/etc/nucarium/environments/*/box', '~/.local/share/containers']
+  + (environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('github', 'defined')
+     | map(attribute='name') | map('regex_replace', '^', agent_home ~ '/workspace-') | list)
+  + (environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('github', 'defined')
+     | map(attribute='config_dir') | list) }}
+
 # The network a cloud session allows by default ("Limited", with package
 # managers allowed), from Claude Code's documentation of cloud environments,
 # plus what the box's own tools need. sandbox_extra_allowed_domains in

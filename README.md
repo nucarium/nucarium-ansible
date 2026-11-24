@@ -102,7 +102,11 @@ read, but it has not been run end to end on real hardware.
   Everything else in the home stays read-only, every dotfile included, and so
   do `~/go/bin`, `~/.cargo/bin` and each bare repository's `hooks/` and
   `config`, because a change to any of them would
-  reach a program that runs outside the sandbox. Two things still differ
+  reach a program that runs outside the sandbox. Nor may they read what
+  container environments hold: their own Git settings and signing keys
+  (`/etc/nucarium/environments/*/box`), the agent user's Podman storage
+  (`~/.local/share/containers`, with their secret variables), and the
+  nucleus and login of each with a GitHub identity of its own. Two things still differ
   from a cloud session: agents are not root, so they cannot install system
   packages or start PostgreSQL and Redis themselves, and the box runs the
   Ubuntu release it was installed with. In a container environment neither
@@ -305,7 +309,7 @@ what a real run would do.
 | Change what one environment's sessions can reach | `network` or `allowed_hosts` in `environments` | `--tags claude,env_setup`; new sessions see it. In a container, `--tags env_runtime,env_setup`: its proxy applies it at once, and its image is built again |
 | Set an environment's variables | `variables` in `environments` | `--tags env_setup`; new sessions see them. In a container its image is built again too |
 | Add or change an environment's setup script | `setup_script` in `environments` | `--tags env_setup`; the script runs at once, and no agent server is restarted. In a container, `--tags env_runtime,env_setup`: the image is built again, and the server takes it up at its next start |
-| Give a container environment its own repositories, secret variables, GitHub identity or start script | `repos`, `secret_variables`, `github` or `start_script` on the environment, and the values of its secret variables in your secrets file | `--tags env_runtime,env_setup,workspace,agent_servers`; the container takes them up at its next start. With a new `github`, register its signing key as the closing message says |
+| Give a container environment its own repositories, secret variables, GitHub identity or start script | `repos`, `secret_variables`, `github` or `start_script` on the environment, and the values of its secret variables in your secrets file | `--tags claude,env_runtime,env_setup,workspace,agent_servers`; the container takes them up at its next start, and the host's new sessions see what they may not read. With a new `github`, register its signing key as the closing message says |
 | Follow a repository to another Playwright | `playwright_version` | `--tags cloud_parity`, and `env_runtime` too if an environment runs in a container |
 | Run an environment in its own container, or back on the host | `runtime` on the environment (a container one needs its own `config_dir`) | `--tags env_runtime,env_setup,claude,workspace,agent_servers,day2`. The first build of the base image takes a while. The switch takes effect when the running server stops by itself, or when you restart it; never while a session runs. The first time, sign it in by hand (the closing message says how) |
 | Add a second Claude login | `environments` | `--tags claude,workspace,env_setup,agent_servers,day2`, then sign it in and start it by hand |

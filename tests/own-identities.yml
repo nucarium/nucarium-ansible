@@ -79,6 +79,13 @@ render_expected_repos:
     - https://github.com/your-org/web.git
     - https://github.com/your-org/api.git
 
+# What sandboxed commands on the host may not read, word for word.
+render_expected_deny_read:
+  - /etc/nucarium/environments/*/box
+  - ~/.local/share/containers
+  - /home/agent/workspace-acme
+  - /home/agent/.claude-acme
+
 # The Git identity of each environment that has its own.
 render_expected_identities:
   acme: [Acme Agent, agent@example.com]

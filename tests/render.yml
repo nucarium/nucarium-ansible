@@ -224,6 +224,12 @@
           - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml', '~/.local/state/nucleated'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
           - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 2 * (repos | length)
           - render_sandbox.excludedCommands | sort == ['docker', 'podman']
+          # Nothing of what container environments hold that another owner's
+          # may: their own Git settings and keys, the agent user's Podman
+          # storage (their secret variables), and the nucleus and login of
+          # each with a GitHub identity of its own.
+          - "['/etc/nucarium/environments/*/box', '~/.local/share/containers'] | difference(render_sandbox.filesystem.denyRead) | length == 0"
+          - render_expected_deny_read is not defined or render_sandbox.filesystem.denyRead == render_expected_deny_read
           - render_settings.permissions.allow == ['mcp__nucleate']
           - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
           - render_bare | map('regex_replace', '$', '/config') | difference(render_sandbox.filesystem.denyWrite) | length == 0

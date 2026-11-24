@@ -237,8 +237,12 @@ github_app_installation_id: "12345678"
 #                    exports in a file in /etc/profile.d reaches the server
 #                    and every session.
 #
-# Changing these needs `--tags env_runtime,env_setup,workspace,agent_servers`;
-# the container takes them up at its next start. For example:
+# Changing these needs
+# `--tags claude,env_runtime,env_setup,workspace,agent_servers`; the
+# container takes them up at its next start. Sandboxed commands on the host
+# cannot read a container environment's own Git settings and key, the
+# Podman storage that holds the secret variables, or, with github, its
+# nucleus and login. For example:
 #
 #   - name: acme
 #     config_dir: /home/agent/.claude-acme
