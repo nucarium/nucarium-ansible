@@ -34,7 +34,7 @@
     uris: https://cli.github.com/packages
     suites: stable
     components: main
-    architectures: amd64
+    architectures: "{{ nucarium_arch.deb }}"
     signed_by: /etc/apt/keyrings/githubcli-archive-keyring.gpg
   register: toolchain_github_source
 
@@ -65,7 +65,7 @@
         uris: https://apt.releases.hashicorp.com
         suites: "{{ ansible_facts.distribution_release }}"
         components: main
-        architectures: amd64
+        architectures: "{{ nucarium_arch.deb }}"
         signed_by: /etc/apt/keyrings/hashicorp.asc
       register: toolchain_hashicorp_source
 
@@ -79,10 +79,10 @@
       ansible.builtin.deb822_repository:
         name: 1password
         types: deb
-        uris: https://downloads.1password.com/linux/debian/amd64
+        uris: https://downloads.1password.com/linux/debian/{{ nucarium_arch.deb }}
         suites: stable
         components: main
-        architectures: amd64
+        architectures: "{{ nucarium_arch.deb }}"
         signed_by: /etc/apt/keyrings/1password.asc
       register: toolchain_1password_source
       when: hcp_mode == 'vault'
@@ -111,7 +111,7 @@
 
     - name: Unpack Go
       ansible.builtin.unarchive:
-        src: https://go.dev/dl/go{{ go_version }}.linux-amd64.tar.gz
+        src: https://go.dev/dl/go{{ go_version }}.linux-{{ nucarium_arch.deb }}.tar.gz
         dest: /usr/local
         remote_src: true
 

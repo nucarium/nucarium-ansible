@@ -1,7 +1,11 @@
 ---
 # Both binaries, nucleate and nucleated, are released from this repository in
-# one archive, with its SHA-256 published beside it as <archive>.sha256.
+# one archive per architecture, with its SHA-256 published beside it as
+# <archive>.sha256. The box gets its own architecture's (vars/architecture.yml),
+# checked against the pin in group_vars/all.yml for that architecture.
 workspace_nucleate_repository: https://github.com/nucarium/nucarium-cli
-workspace_nucleate_target: x86_64-unknown-linux-musl
+workspace_nucleate_target: "{{ nucarium_arch.target }}"
 workspace_nucleate_asset: "nucleate-v{{ nucleate_version }}-{{ workspace_nucleate_target }}.tar.gz"
 workspace_nucleate_url: "{{ workspace_nucleate_repository }}/releases/download/v{{ nucleate_version }}/{{ workspace_nucleate_asset }}"
+workspace_nucleate_sha256_setting: "{{ 'nucleate_sha256_aarch64' if nucarium_machine == 'aarch64' else 'nucleate_sha256' }}"
+workspace_nucleate_sha256: "{{ lookup('ansible.builtin.vars', workspace_nucleate_sha256_setting, default='') }}"

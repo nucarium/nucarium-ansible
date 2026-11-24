@@ -6,11 +6,12 @@
 - name: Check the nucleate release settings
   ansible.builtin.assert:
     that:
-      - nucleate_local_archive | length > 0 or nucleate_sha256 is match('^[0-9a-f]{64}$')
-      - nucleate_local_archive | length > 0 or nucleate_sha256 is not match('^0+$')
+      - nucleate_local_archive | length > 0 or workspace_nucleate_sha256 is match('^[0-9a-f]{64}$')
+      - nucleate_local_archive | length > 0 or workspace_nucleate_sha256 is not match('^0+$')
     fail_msg: >-
-      nucleate_sha256 in group_vars/all.yml must be the SHA-256 of
-      {{ workspace_nucleate_asset }}, as published beside it on the releases page.
+      {{ workspace_nucleate_sha256_setting }} in group_vars/all.yml must be the
+      SHA-256 of {{ workspace_nucleate_asset }}, this box's archive, as published
+      beside it on the releases page.
       To install a build of your own instead, set nucleate_local_archive.
     quiet: true
 
@@ -33,7 +34,7 @@
       ansible.builtin.get_url:
         url: "{{ workspace_nucleate_url }}"
         dest: "{{ agent_home }}/.cache/nucarium/{{ workspace_nucleate_asset }}"
-        checksum: "sha256:{{ nucleate_sha256 }}"
+        checksum: "sha256:{{ workspace_nucleate_sha256 }}"
         mode: "0644"
       when: nucleate_local_archive | length == 0
 

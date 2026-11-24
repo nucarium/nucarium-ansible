@@ -10,6 +10,7 @@
   vars_files:
     - vars/sandbox.yml
     - vars/runtime.yml
+    - vars/architecture.yml
 
   vars:
     # The nucleus: bare clones in .repos/, sessions in .worktrees/, seed
@@ -104,6 +105,17 @@
 
     - name: Gather facts
       ansible.builtin.setup:
+      tags: always
+
+    - name: Check the box's architecture
+      ansible.builtin.assert:
+        that:
+          - nucarium_machine in nucarium_architectures
+        fail_msg: >-
+          This box is {{ nucarium_machine }}. The recipe installs
+          for x86_64, and for aarch64 (arm64) as community-supported, and for
+          no other architecture.
+        quiet: true
       tags: always
 
     # The users role creates the agent user. On a run of one part (--tags)

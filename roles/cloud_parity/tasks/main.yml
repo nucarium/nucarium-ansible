@@ -36,7 +36,7 @@
 
 - name: Install yq
   ansible.builtin.get_url:
-    url: https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    url: https://github.com/mikefarah/yq/releases/latest/download/yq_linux_{{ nucarium_arch.deb }}
     dest: /usr/local/bin/yq
     mode: "0755"
     force: false
@@ -55,7 +55,7 @@
     cloud_parity_node_release: >-
       {{ cloud_parity_node_index.json | selectattr('version', 'match', '^v' ~ item ~ '\.')
       | map(attribute='version') | first }}
-    cloud_parity_node_dir: node-{{ cloud_parity_node_release }}-linux-x64
+    cloud_parity_node_dir: node-{{ cloud_parity_node_release }}-linux-{{ nucarium_arch.node }}
   block:
     - name: Download each Node release
       ansible.builtin.get_url:
@@ -126,14 +126,14 @@
 
     - name: Unpack Chrome for Testing
       ansible.builtin.unarchive:
-        src: https://storage.googleapis.com/chrome-for-testing-public/{{ chrome_for_testing_version }}/linux64/chrome-linux64.zip
+        src: https://storage.googleapis.com/chrome-for-testing-public/{{ chrome_for_testing_version }}/{{ nucarium_arch.chrome }}/chrome-{{ nucarium_arch.chrome }}.zip
         dest: "{{ cloud_parity_chrome_dir }}"
         remote_src: true
-        creates: "{{ cloud_parity_chrome_dir }}/chrome-linux64/chrome"
+        creates: "{{ cloud_parity_chrome_dir }}/chrome-{{ nucarium_arch.chrome }}/chrome"
 
     - name: Put it at /usr/bin/google-chrome
       ansible.builtin.file:
-        src: "{{ cloud_parity_chrome_dir }}/chrome-linux64/chrome"
+        src: "{{ cloud_parity_chrome_dir }}/chrome-{{ nucarium_arch.chrome }}/chrome"
         dest: /usr/bin/google-chrome
         state: link
         force: true
