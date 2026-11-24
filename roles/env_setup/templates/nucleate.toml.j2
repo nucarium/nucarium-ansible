@@ -6,6 +6,7 @@ root = "{{ env_nucleus }}"
 # The broker's short-lived GitHub token, for the merged-pull-request check.
 github_token_file = "/run/agent-tokens/github"
 {% else %}
-# No token file: the environment has a GitHub identity of its own, and
-# nucleate's merged-pull-request check uses its GITHUB_TOKEN.
+# The environment's own GitHub token (it has a GitHub identity of its own),
+# for the merged-pull-request check.
+github_token_file = "{{ nucarium_env_github_token_file }}"
 {% endif %}

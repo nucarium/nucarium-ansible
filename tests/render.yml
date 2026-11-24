@@ -78,6 +78,9 @@
     - name: Check the logins of container environments
       ansible.builtin.import_tasks: ../tasks/check-container-logins.yml
 
+    - name: Check the environments that have had a GitHub identity of their own
+      ansible.builtin.import_tasks: ../tasks/check-github-environments.yml
+
     - name: Start from an empty folder
       ansible.builtin.file:
         path: "{{ render_dir }}"
@@ -158,6 +161,11 @@
           # report-only; without one the table is left out, for a nucleated
           # too old to know it.
           - "render_config.git | default({}) == ({'vetting': 'enforce'} if nucarium_container_envs else {})"
+          # An environment with a GitHub identity of its own is worked in with
+          # its own token, from its own folder.
+          - >-
+            render_config.environment | selectattr('github_token_file', 'defined') | map(attribute='github_token_file') | list
+            == render_identity_envs | map(attribute='name') | map('regex_replace', '^(.*)$', '/etc/nucarium/environments/\\1/box/github-token') | list
         quiet: true
       vars:
         render_config: "{{ render_daemon.stdout | from_json }}"
@@ -592,14 +600,14 @@
       register: render_nucleate
       changed_when: false
 
-    # An environment with a GitHub identity of its own names no token file:
-    # nucleate uses its GITHUB_TOKEN. One with repos of its own offers those.
+    # An environment with a GitHub identity of its own names its own token
+    # file, in its own folder. One with repos of its own offers those.
     - name: Check each against the environment's nucleus and its repositories
       ansible.builtin.assert:
         that:
-          - (item.stdout | from_json).keys() | sort == (['root'] if env_github else ['github_token_file', 'root'])
+          - (item.stdout | from_json).keys() | sort == ['github_token_file', 'root']
           - (item.stdout | from_json).root == agent_home ~ '/workspace-' ~ item.env.name
-          - env_github | length > 0 or (item.stdout | from_json).github_token_file == '/run/agent-tokens/github'
+          - (item.stdout | from_json).github_token_file == ('/etc/nucarium/environments/' ~ item.env.name ~ '/box/github-token' if env_github else '/run/agent-tokens/github')
           - render_repos == env_repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | map('regex_replace', '^(.*)$', 'https://github.com/\\1.git') | list
           - render_expected_repos is not defined or render_repos == render_expected_repos[item.env.name]
         quiet: true

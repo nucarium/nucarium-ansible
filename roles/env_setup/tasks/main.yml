@@ -85,6 +85,32 @@
     loop_var: env
     label: "{{ env.name }}"
 
+# Once an environment has had a GitHub identity of its own, the host's
+# sandboxes never read its nucleus or login, and no environment without one
+# takes its name or login (tasks/check-github-environments.yml): one file
+# per name and config_dir, holding them and the nucleus. Kept when the
+# environment is removed or renamed, as its nucleus and login are.
+- name: Create the record of the environments with a GitHub identity of their own
+  ansible.builtin.file:
+    path: "{{ nucarium_github_envs_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: environments | selectattr('github', 'defined') | list | length > 0
+
+- name: Record each of them
+  ansible.builtin.copy:
+    content: "{{ {'name': env.name, 'nucleus': env_nucleus, 'config_dir': env.config_dir} | to_json }}\n"
+    dest: "{{ nucarium_github_envs_dir }}/{{ [env.name, env.config_dir] | to_json | hash('sha256') }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('github', 'defined') | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
 - name: What a container environment's image is built from
   ansible.builtin.import_tasks: container.yml
 

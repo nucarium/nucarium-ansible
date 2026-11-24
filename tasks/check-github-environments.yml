@@ -1,0 +1,44 @@
+---
+# Reads, on the box, the record of every container environment that has had
+# a GitHub identity of its own (nucarium_github_envs_dir, which the env_setup
+# role writes), into nucarium_github_envs_recorded for the claude role: the
+# sandboxes on the host never read what those held. Stops before anything
+# changes when an environment without github has the name or config_dir of
+# one of them: its login, code and token may be another owner's, and the
+# environment would get the box's GitHub App and Git settings with them.
+# Imported by site.yml and by tests/render.yml, where there is no record
+# unless scripts/check gives one.
+- name: Look for the environments that have had a GitHub identity of their own
+  ansible.builtin.find:
+    paths: "{{ nucarium_github_envs_dir }}"
+    file_type: file
+  register: github_envs_found
+
+- name: Read what each of them was
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ github_envs_found.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  register: github_envs_read
+
+- name: Keep them for the sandbox settings
+  ansible.builtin.set_fact:
+    nucarium_github_envs_recorded: "{{ github_envs_read.results | map(attribute='content') | map('b64decode') | map('from_json') | list }}"
+
+- name: Stop if an environment without github has the name or login of one
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml:
+      {% for e in github_envs_reused %}environment {{ e.name }}: its
+      {{ 'name' if e.name in nucarium_github_envs_recorded | map(attribute='name') else 'config_dir ' ~ e.config_dir }}
+      was a container environment's with a GitHub identity of its own (github), whose login, code and
+      token may be another owner's: give it its github back, or a new name and config_dir (a new login,
+      signed in again); {% endfor %}nothing on the box has been changed.
+  when: github_envs_reused | length > 0
+  vars:
+    github_envs_reused: >-
+      {{ environments | rejectattr('github', 'defined')
+      | selectattr('name', 'in', nucarium_github_envs_recorded | map(attribute='name') | list) | list
+      + environments | rejectattr('github', 'defined') | rejectattr('name', 'in', nucarium_github_envs_recorded | map(attribute='name') | list)
+      | selectattr('config_dir', 'defined') | selectattr('config_dir', 'in', nucarium_github_envs_recorded | map(attribute='config_dir') | list) | list }}

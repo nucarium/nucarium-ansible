@@ -117,6 +117,10 @@
       when: agent_home is defined
       tags: always
 
+    - name: Check the environments that have had a GitHub identity of their own
+      ansible.builtin.import_tasks: tasks/check-github-environments.yml
+      tags: always
+
   roles:
     - role: base
       become: true

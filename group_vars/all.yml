@@ -83,7 +83,11 @@ github_app_installation_id: "12345678"
 # nucleus, its repositories and the GitHub App. A container environment
 # (runtime: container) can have repositories, secrets and a GitHub identity
 # of its own, below, so that it can belong to another owner: the others
-# cannot see its credentials or its code.
+# cannot see its credentials or its code. Environments of different owners
+# need every environment on the box in a container: sessions on the host
+# run podman outside their sandbox, as the user that owns every container's
+# secrets, so the playbook refuses github and secret_variables on a box
+# with an environment on the host.
 #
 #   name        A short label: lower-case letters, digits and hyphens. It
 #               names the service (agent-server@<name>, or agent-env-<name>
@@ -205,29 +209,36 @@ github_app_installation_id: "12345678"
 #   secret_variables Names of variables whose values are secret, one per
 #                    line, set in its container, its agent server and every
 #                    session (a Terraform token, say). The values are not
-#                    in this file: each is secrets.environments.<env>.<NAME>
-#                    in the file of secrets you give the playbook
-#                    (-e @secrets.yml), and the playbook stops, changing
-#                    nothing, when one has none. A secrets given this way
-#                    takes the place of what secret_refs reads, so the file
-#                    holds the box's other secrets too. Each is kept as the agent
-#                    user's Podman secret nucarium-env-<env>-<name>. A name
-#                    may not also be in variables. Not in the image: the
-#                    setup script does not get them.
+#                    in this file: each is environment_secrets.<env>.<NAME>
+#                    in a file of your own you give the playbook
+#                    (-e @environment-secrets.yml, an Ansible Vault file
+#                    say), which leaves secret_refs as they are; a whole
+#                    secrets given with -e may hold them as
+#                    secrets.environments instead. The playbook stops,
+#                    changing nothing, when one has no value. Each is kept
+#                    as the agent user's Podman secret
+#                    nucarium-env-<env>-<name>. A name may not also be in
+#                    variables, and GITHUB_TOKEN and GH_TOKEN need github.
+#                    Not in the image: the setup script does not get them.
 #   github           Its own GitHub identity: name: and email:, for its
 #                    commits. It needs GITHUB_TOKEN in secret_variables,
 #                    a token of that GitHub account, which its Git uses for
-#                    github.com and nucleate for pull requests. With it, the
-#                    environment uses nothing of the box's GitHub: not the
-#                    GitHub App, not git_user_name and its signing key, not
-#                    the packages token (list NODE_AUTH_TOKEN in
-#                    secret_variables for one of its own). It signs its
-#                    commits with a key of its own, made once on the box;
-#                    the playbook copies its public half to
+#                    github.com, and nucleate and nucleated, from a file in
+#                    the environment's own folder, for its repositories.
+#                    With it, the environment uses nothing of the box's
+#                    GitHub: not the GitHub App, not git_user_name and its
+#                    signing key, not the packages token (list
+#                    NODE_AUTH_TOKEN in secret_variables for one of its
+#                    own). It signs its commits with a key of its own, made
+#                    once on the box; the playbook copies its public half to
 #                    out/<box>-<env>-signing.pub, and the closing message
 #                    says how to register it on that account. The host clones
 #                    none of its repositories: its agent server clones them,
-#                    in the container, at its first start.
+#                    in the container, at its first start. The box remembers
+#                    it: removed or renamed, its nucleus and login stay on
+#                    the box, sessions on the host never read them, and the
+#                    playbook refuses an environment without github that has
+#                    its name or config_dir.
 #   start_script     A bash script, run as root in /root in its container
 #                    each time the container starts, before the agent server:
 #                    for the services the setup script installed (a database
@@ -241,8 +252,8 @@ github_app_installation_id: "12345678"
 # `--tags claude,env_runtime,env_setup,workspace,agent_servers`; the
 # container takes them up at its next start. Sandboxed commands on the host
 # cannot read a container environment's own Git settings and key, the
-# Podman storage that holds the secret variables, or, with github, its
-# nucleus and login. For example:
+# Podman storage that holds the secret variables, or, once it has had
+# github, its nucleus and login. For example:
 #
 #   - name: acme
 #     config_dir: /home/agent/.claude-acme
@@ -259,13 +270,12 @@ github_app_installation_id: "12345678"
 #     start_script: |
 #       service postgresql start
 #
-# with, in the secrets file:
+# with, in the file of environment secrets (-e @environment-secrets.yml):
 #
-#   secrets:
-#     environments:
-#       acme:
-#         GITHUB_TOKEN: "..."
-#         TF_TOKEN: "..."
+#   environment_secrets:
+#     acme:
+#       GITHUB_TOKEN: "..."
+#       TF_TOKEN: "..."
 environments:
   - name: main
     capacity: 12

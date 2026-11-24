@@ -43,6 +43,11 @@ ansible-playbook tests/render.yml
 ansible-playbook tests/render.yml -e @tests/two-logins.yml
 ansible-playbook tests/render.yml -e @tests/three-networks.yml
 ansible-playbook tests/render.yml -e @tests/own-identities.yml
+# The same, with the environments' secrets inside a whole secrets given
+# with -e, as some operators give every secret.
+ansible-playbook tests/render.yml -e @tests/own-identities.yml -e '{"environment_secrets": {},
+  "secrets": {"npm_token": "render-only", "environments": {"acme": {"GITHUB_TOKEN": "a", "TF_TOKEN": "b", "NODE_AUTH_TOKEN": "c"},
+  "tools": {"API_KEY": "d"}, "docs": {"NODE_AUTH_TOKEN": "e"}}}}'
 
 echo "== render the container environments' networks and proxies"
 ansible-playbook tests/proxy.yml
@@ -110,8 +115,14 @@ refuse 'secret_variables has names the container sets itself: PATH' "{\"name\": 
 refuse 'repos has entries that are not a repository (a name, or owner/name): https://github.com/acme/web' "{\"name\": \"acme\", $box, \"repos\": [\"https://github.com/acme/web\"]}"
 refuse 'repos has more than one repository named web, which would share one clone' "{\"name\": \"acme\", $box, \"repos\": [\"web\", \"acme/web\"]}"
 refuse 'start_script is the script itself, as text' "{\"name\": \"acme\", $box, \"start_script\": [\"service postgresql start\"]}"
+refuse 'secret_variables names GITHUB_TOKEN, which only an environment with github may have' "{\"name\": \"acme\", $box, \"secret_variables\": [\"GITHUB_TOKEN\"]}"
+refuse 'secret_variables names GH_TOKEN, which only an environment with github may have' "{\"name\": \"acme\", $box, \"secret_variables\": [\"GH_TOKEN\"]}"
+# Sessions on the host run podman outside their sandbox, as the owner of
+# every container's secrets.
+refuse 'environment acme has github or secret_variables, which need every environment on the box in a container (runtime: container), and main is on the host: sessions on the host run podman outside their sandbox' "{\"name\": \"main\"}, {\"name\": \"acme\", $box, \"secret_variables\": [\"TF_TOKEN\"]}"
+refuse 'and main is on the host' "{\"name\": \"main\"}, {\"name\": \"acme\", $box, \"secret_variables\": [\"GITHUB_TOKEN\"], \"github\": {\"name\": \"Acme Agent\", \"email\": \"agent@example.com\"}}"
 refuse 'would all be stored as nucarium-env-a-b-c' '{"name": "a-b", "runtime": "container", "config_dir": "/home/agent/.claude-ab", "secret_variables": ["C"]}, {"name": "a", "runtime": "container", "config_dir": "/home/agent/.claude-a", "secret_variables": ["B_C"]}'
-refuse 'environment acme: secret_variables lists TF_TOKEN, and secrets.environments.acme.TF_TOKEN has no value' "{\"name\": \"acme\", $box, \"secret_variables\": [\"TF_TOKEN\"]}"
+refuse 'environment acme: secret_variables lists TF_TOKEN, and environment_secrets.acme.TF_TOKEN has no value' "{\"name\": \"acme\", $box, \"secret_variables\": [\"TF_TOKEN\"]}"
 # shellcheck disable=SC2016  # the ${#x} is the script's, not this one's
 refuse 'environment acme: start_script has {{, {% or {# in it' "{\"name\": \"acme\", $box, \"start_script\": \"n=\${#x}\"}"
 
@@ -130,5 +141,27 @@ case "$out" in
   *) printf '%s\n' "$out"; echo "Refused, but without saying why: a container login on the host"; exit 1 ;;
 esac
 refuse '(/home/agent), and is /home/agent/logins/.claude-second' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/logins/.claude-second"}'
+
+# An environment that has had a GitHub identity of its own: no environment
+# without one takes its name or login, and sessions on the host never read
+# its nucleus or login, even once it is gone from the settings.
+github_envs=out/render-github-envs
+rm -rf "$github_envs" && mkdir -p "$github_envs"
+echo '{"name": "acme", "nucleus": "/home/agent/workspace-acme", "config_dir": "/home/agent/.claude-acme"}' > "$github_envs/acme"
+refuse_recorded() {
+  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" -e "nucarium_github_envs_dir=$PWD/$github_envs" 2>&1); then
+    echo "Accepted, but must be refused: $2"
+    exit 1
+  fi
+  case "$out" in
+    *"$1"*) echo "refused: $2, after a GitHub identity of its own" ;;
+    *) printf '%s\n' "$out"; echo "Refused, but without saying: $1"; exit 1 ;;
+  esac
+}
+refuse_recorded "environment acme: its name was a container environment's with a GitHub identity of its own" '{"name": "acme", "config_dir": "/home/agent/.claude-acme"}'
+refuse_recorded "environment other: its config_dir /home/agent/.claude-acme was a container environment's" '{"name": "other", "runtime": "container", "config_dir": "/home/agent/.claude-acme"}'
+ansible-playbook tests/render.yml -e "nucarium_github_envs_dir=$PWD/$github_envs" -e '{"render_expected_deny_read":
+  ["/etc/nucarium/environments/*/box", "~/.local/share/containers", "/home/agent/workspace-acme", "/home/agent/.claude-acme"]}' > /dev/null
+echo "a host environment's sandbox never reads a recorded nucleus or login"
 
 echo "== all checks passed"

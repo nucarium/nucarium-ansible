@@ -38,6 +38,21 @@ nucarium_nucleus_protected:
 # Kept when the environment is removed or renamed.
 nucarium_container_logins_dir: /etc/nucarium/container-logins
 
+# One file per container environment that has had a GitHub identity of its
+# own (github), root's, named after the hash of its name and config_dir and
+# holding them and its nucleus as JSON. Such an environment may be another
+# owner's, and its nucleus and login stay on the box when it is removed or
+# renamed, so this is kept then too: sessions on the host never read what
+# any of them held (the claude role), and the playbook refuses an
+# environment without github that has one's name or config_dir
+# (tasks/check-github-environments.yml).
+nucarium_github_envs_dir: /etc/nucarium/github-environments
+
+# The file, in such an environment's own Git folder, that holds its
+# GITHUB_TOKEN for nucleate and nucleated (github_token_file): the agent
+# user's, and at the same path on the host and in its container.
+nucarium_env_github_token_file: "{{ nucarium_env_box_dir }}/github-token"
+
 # PATH in a container environment: the base image's (ENV PATH in
 # roles/env_runtime/files/base/Containerfile, which tests/render.yml checks
 # this against), then the box's own tools, mounted read-only from the host
@@ -102,6 +117,15 @@ nucarium_env_box_dir: /etc/nucarium/environments/{{ env.name }}/box
 # the variable (Secret= in agent-env.container.j2): nucarium-env-<env>-<the
 # name in lower case, with - for _>. Every Podman secret whose name starts
 # with nucarium_env_secret_prefix and is not on this list is removed.
+# Their values, environment_secrets.<env>.<NAME>: a variable of its own,
+# given in a file of its own (-e @environment-secrets.yml), so that it leaves
+# secrets, and what secret_refs reads into it, as they are. A whole secrets
+# given with -e may hold them as secrets.environments instead;
+# environment_secrets wins where both name one. A set_fact into secrets
+# would be lost there: extra variables outrank it.
+nucarium_environment_secrets: >-
+  {{ ((secrets | default({})).environments | default({}, true) if (secrets | default({})).environments | default({}, true) is mapping else {})
+  | combine(environment_secrets | default({}, true) if environment_secrets | default({}, true) is mapping else {}, recursive=true) }}
 nucarium_env_secret_prefix: nucarium-env-
 nucarium_env_secrets: >-
   {% set ns = namespace(out=[]) %}{% for e in environments if e.name in nucarium_container_envs %}{% for name in e.secret_variables | default([], true) %}{% set ns.out = ns.out + [{'env': e.name, 'name': name, 'secret': nucarium_env_secret_prefix ~ e.name ~ '-' ~ (name | lower | replace('_', '-'))}] %}{% endfor %}{% endfor %}{{ ns.out }}

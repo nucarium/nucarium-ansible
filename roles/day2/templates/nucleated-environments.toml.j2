@@ -8,4 +8,9 @@ root = "{{ (agent_home ~ '/workspace-' ~ env.name) if env.runtime | default('hos
 unit = "{{ ('agent-env-' ~ env.name ~ '.service') if env.runtime | default('host', true) == 'container' else ('agent-server@' ~ env.name ~ '.service') }}"
 agent = "claude-code"
 config_dir = "{{ env.config_dir | default(agent_home ~ '/.claude') }}"
+{% if env.runtime | default('host', true) == 'container' and env.github is defined %}
+# Its own GitHub token, for the daemon's work in its nucleus: the box's
+# GitHub App cannot reach another owner's repositories.
+github_token_file = "/etc/nucarium/environments/{{ env.name }}/box/github-token"
+{% endif %}
 {% endfor %}

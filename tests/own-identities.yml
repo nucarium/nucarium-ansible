@@ -1,26 +1,27 @@
 ---
-# A fourth shape to render: three container environments beside one on the
-# host. acme belongs to another owner: its own repositories, secret
-# variables, GitHub identity, npm token and start script. tools has its own
-# repositories and a secret variable, and the box's GitHub App and npm
-# token. docs has the box's repositories and GitHub App, and an npm token of
-# its own in place of the box's. The start script holds text Ansible would
-# read as a template, so it is marked !unsafe.
+# A fourth shape to render: three container environments, and none on the
+# host, which a box with secrets of an environment's own may not have. acme
+# belongs to another owner: its own repositories, secret variables, GitHub
+# identity, npm token and start script. tools has its own repositories and
+# a secret variable, and the box's GitHub App and npm token. docs has the
+# box's repositories and GitHub App, and an npm token of its own in place of
+# the box's. The start script holds text Ansible would read as a template,
+# so it is marked !unsafe.
 nucleate_version: "0.7.0"
-# Stand-ins for the secrets file the playbook is given (-e @secrets.yml).
+# Stand-ins for what the playbook reads from 1Password, and for the file of
+# environment secrets it is given (-e @environment-secrets.yml).
 secrets:
   npm_token: render-only
-  environments:
-    acme:
-      GITHUB_TOKEN: render-only-github
-      TF_TOKEN: render-only-terraform
-      NODE_AUTH_TOKEN: render-only-npm
-    tools:
-      API_KEY: render-only-key
-    docs:
-      NODE_AUTH_TOKEN: render-only-docs-npm
+environment_secrets:
+  acme:
+    GITHUB_TOKEN: render-only-github
+    TF_TOKEN: render-only-terraform
+    NODE_AUTH_TOKEN: render-only-npm
+  tools:
+    API_KEY: render-only-key
+  docs:
+    NODE_AUTH_TOKEN: render-only-docs-npm
 environments:
-  - name: main
   - name: acme
     config_dir: /home/agent/.claude-acme
     runtime: container
@@ -79,13 +80,6 @@ render_expected_repos:
     - https://github.com/your-org/web.git
     - https://github.com/your-org/api.git
 
-# What sandboxed commands on the host may not read, word for word.
-render_expected_deny_read:
-  - /etc/nucarium/environments/*/box
-  - ~/.local/share/containers
-  - /home/agent/workspace-acme
-  - /home/agent/.claude-acme
-
 # The Git identity of each environment that has its own.
 render_expected_identities:
   acme: [Acme Agent, agent@example.com]
@@ -96,13 +90,6 @@ render_expected_start_scripts:
 
 # What each environment's summary must say, word for word.
 render_expected_summaries:
-  main:
-    network: limited
-    allowed_hosts: 0
-    repos: [your-org/web, your-org/api]
-    variables: 0
-    secrets: 0
-    setup_script: false
   acme:
     network: limited
     allowed_hosts: 0

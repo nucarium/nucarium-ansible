@@ -93,6 +93,7 @@
       + ([] if env.github is not defined
          else (['github is the environment' ~ "'" ~ 's Git identity, name: and email: (an address, such as dev@example.com), and nothing else'] if env.github is not mapping or env.github.keys() | map('string') | sort != ['email', 'name'] or env.github.name is not string or env.github.email is not string or env.github.name | trim | length == 0 or env.github.name is search('[\n<>]') or env.github.email is not match(env_email) else [])
             + (['github needs GITHUB_TOKEN in secret_variables: the environment' ~ "'" ~ 's Git credential helper answers with that token'] if 'GITHUB_TOKEN' not in env_secret_names else []))
+      + (['secret_variables names ' ~ (env_secret_names | select('in', ['GH_TOKEN', 'GITHUB_TOKEN']) | join(' and ')) ~ ', which only an environment with github may have: its sessions would use that token, and its Git and nucleate the box' ~ "'" ~ 's GitHub App'] if env.github is not defined and env_secret_names | select('in', ['GH_TOKEN', 'GITHUB_TOKEN']) | list else [])
       + (['start_script is the script itself, as text (write start_script: | and the script below it)'] if env_start_script is not string else [])
       }}
   loop: "{{ environments }}"
@@ -114,3 +115,24 @@
   when: env_shared | length > 0
   vars:
     env_shared: "{{ nucarium_env_secrets | map(attribute='secret') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | list }}"
+
+# podman and docker run outside the sandbox of a session on the host
+# (excludedCommands), as the agent user, who owns every container's Podman
+# secrets, keys and logins: such a session could read them all. So a box
+# with an environment that holds secrets of its own has every environment in
+# a container, where the container is the boundary.
+- name: Check no environment on the host shares the box with one that has secrets of its own
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml: environment {{ env_own_secrets | join(', ') }}
+      {{ 'has' if env_own_secrets | length == 1 else 'have' }} github or secret_variables, which need every
+      environment on the box in a container (runtime: container), and {{ env_on_host | join(', ') }}
+      {{ 'is' if env_on_host | length == 1 else 'are' }} on the host: sessions on the host run podman outside
+      their sandbox, as the user that owns every container's secrets, so they could read them. Put
+      {{ env_on_host | join(', ') }} in a container, or the environments of other owners on a box of their own.
+  when: env_own_secrets | length > 0 and env_on_host | length > 0
+  vars:
+    env_own_secrets: >-
+      {{ (environments | selectattr('github', 'defined') | map(attribute='name') | list
+      + environments | selectattr('secret_variables', 'defined') | selectattr('secret_variables') | map(attribute='name') | list) | unique }}
+    env_on_host: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='name') | list }}"
