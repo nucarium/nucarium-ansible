@@ -44,6 +44,11 @@ Environment=DISABLE_AUTOUPDATER=1
 Environment=NUCLEATE_CONFIG=/etc/nucarium/environments/{{ env.name }}/nucleate.toml
 Environment=NUCLEATED_CONFIG={{ nucarium_nucleated_hook_dir }}/config.toml
 Environment=NPM_CONFIG_GLOBALCONFIG={{ nucarium_box_dir }}/npmrc
+{% if secrets.npm_token is defined %}
+# The same token as NODE_AUTH_TOKEN, for pnpm, through the ~/.npmrc line
+# agent-env-hold writes (the env_runtime role stores the secret).
+Secret={{ nucarium_npm_secret }},type=env,target=NODE_AUTH_TOKEN
+{% endif %}
 Environment=AGENT_SERVER_RUNTIME=container
 Environment=AGENT_SERVER_NAME={{ env.name }}
 Environment=AGENT_SERVER_ROOT={{ nucarium_servers_dir }}/{{ env.name }}

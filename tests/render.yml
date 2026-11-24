@@ -213,6 +213,7 @@
           - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml', '~/.local/state/nucleated'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
           - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 2 * (repos | length)
           - render_sandbox.excludedCommands | sort == ['docker', 'podman']
+          - render_settings.permissions.allow == ['mcp__nucleate']
           - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
           - render_bare | map('regex_replace', '$', '/config') | difference(render_sandbox.filesystem.denyWrite) | length == 0
           - env_network in ['none', 'limited', 'full']
@@ -243,6 +244,7 @@
           - "render_settings.sandbox == {'enabled': false}"
           - render_settings.autoUpdatesChannel == 'stable'
           - render_settings.permissions.deny | length == 3
+          - render_settings.permissions.allow == ['mcp__nucleate']
         quiet: true
       vars:
         render_settings: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.settings.json') | from_json }}"
@@ -449,6 +451,9 @@
           - "('ExecStartPre=/usr/local/lib/nucarium/agent-env-start ' ~ env.name ~ ' ' ~ render_nucleus ~ ' %t/agent-env-' ~ env.name ~ '.volumes') in render_lines"
           - render_env.NUCLEATED_CONFIG == agent_home ~ '/.config/nucleated-hook/config.toml'
           - render_env.NPM_CONFIG_GLOBALCONFIG == '/etc/nucarium/box/npmrc'
+          # The npm token as NODE_AUTH_TOKEN, from a Podman secret, only on a
+          # box with one.
+          - render_lines | select('match', 'Secret=') | list == (['Secret=' ~ nucarium_npm_secret ~ ',type=env,target=NODE_AUTH_TOKEN'] if secrets.npm_token is defined else [])
           - render_env.AGENT_SERVER_RUNTIME == 'container'
           - render_env.AGENT_SERVER_NAME == env.name
           - render_env.AGENT_SERVER_ROOT == '/etc/nucarium/servers/' ~ env.name

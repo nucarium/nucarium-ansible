@@ -14,6 +14,14 @@ export GITHUB_TOKEN="$GH_TOKEN"
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export CHROME_PATH=/usr/bin/google-chrome
 export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
+# GitHub Packages' token as NODE_AUTH_TOKEN, the name repositories' READMEs
+# give it in their ~/.npmrc line, so that such a line works here too. A
+# container environment has it already (a Podman secret); on the host it is
+# the token in the agent user's ~/.npmrc.
+if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+  NODE_AUTH_TOKEN="$(sed -n 's#^//npm\.pkg\.github\.com/:_authToken=\([^$].*\)#\1#p' "$HOME/.npmrc" 2>/dev/null | head -n 1)"
+  if [ -n "$NODE_AUTH_TOKEN" ]; then export NODE_AUTH_TOKEN; else unset NODE_AUTH_TOKEN; fi
+fi
 # Appended, and read-only to sandboxed commands (vars/sandbox.yml).
 export PATH="$PATH:$HOME/go/bin:$HOME/.cargo/bin"
 ENVEOF
