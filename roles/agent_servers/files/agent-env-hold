@@ -3,9 +3,9 @@
 # (agent-env-<name>.service), as tmux is the main process of the unit on the
 # host: starts the agent server in a tmux session of its own, and lasts as
 # long as that session does, so the container ends when the server exits by
-# itself and its unit starts it again. Stopping the container hangs up on the
-# server, as closing its terminal would, and waits until it has gone. Look at
-# it with:
+# itself and its unit starts it again. Stopping the container stops the
+# server with Ctrl-C, as a person would in its terminal, and waits until it
+# has gone. Look at it with:
 #   podman exec -it agent-env-<name> tmux -L agent-<name> attach
 set -euo pipefail
 name="${AGENT_SERVER_NAME:?set by the unit}"
@@ -25,15 +25,18 @@ if [ -n "${NODE_AUTH_TOKEN:-}" ] &&
   printf '%s\n' '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' >> "$HOME/.npmrc"
 fi
 
-# Hangs up on the server, then waits for it to exit, within the unit's
-# StopTimeout. A server stopped before it has unregistered still counts as
-# serving its folder for several minutes, and the next one would not start.
+# Stops the server as a person would in its terminal, with Ctrl-C, and
+# waits for it to exit, within the unit's StopTimeout. Ctrl-C lets it
+# unregister; a hang-up does not, and the folder then counts as served for
+# several minutes, so the next server is refused. Hangs up on whatever is
+# left.
 stop() {
-  tmux -L "$socket" kill-server 2> /dev/null || true
+  tmux -L "$socket" send-keys -t "$name" C-c 2> /dev/null || true
   for _ in $(seq 50); do
     pgrep -f 'claude remote-control' > /dev/null || break
     sleep 1
   done
+  tmux -L "$socket" kill-server 2> /dev/null || true
   exit 0
 }
 tmux -L "$socket" new-session -d -s "$name" "$command"
