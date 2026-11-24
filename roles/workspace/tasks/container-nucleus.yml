@@ -38,10 +38,16 @@
         label: "{{ env.name }}"
       register: workspace_nuclei_found
 
+    # nucleate init names the nucleus it makes in its config when that names
+    # none yet, which the host's does not on a box with no environment on
+    # the host. A container's nucleus is never the host's default, so its
+    # init gets no config to write.
     - name: Create each new one
       ansible.builtin.command: nucleate --root {{ env_nucleus }} init
       args:
         creates: "{{ env_nucleus }}/.repos"
+      environment:
+        NUCLEATE_CONFIG: /dev/null
       loop: "{{ workspace_container_envs | selectattr('name', 'in', workspace_new_nuclei) | list }}"
       loop_control:
         loop_var: env

@@ -21,8 +21,12 @@ ExecStart=/usr/bin/restic backup \
 {% endfor %}
   {{ agent_home }}/.config \
   {{ agent_home }}/.local/bin \
+{# The shared nucleus only where an environment uses it: restic fails the #}
+{# backup on a path that is not there. #}
+{% if nucarium_host_envs %}
   {{ nucleus_root }}/.seeds \
   {{ nucleus_root }}/.claude \
+{% endif %}
 {% for name in nucarium_container_envs %}
   {{ agent_home }}/workspace-{{ name }}/.seeds \
 {% endfor %}

@@ -3,8 +3,12 @@
 # session in .worktrees/, seed files in .seeds/. nucleate builds and manages
 # it; this role only says where it is and which repositories it offers. The
 # environments on the host share this one; each container environment has
-# its own (container-nucleus.yml).
+# its own (container-nucleus.yml). A box whose environments all run in
+# containers has no use for it, so there it is not made, and nothing is
+# cloned into it. One left from before is left as it is, unsaved work and
+# all, and stays reachable with nucleate --root.
 - name: The nucleus, for the agent user
+  when: nucarium_host_envs | length > 0
   become: true
   become_user: "{{ agent_user }}"
   environment:
@@ -104,6 +108,18 @@
         label: "{{ found.env.name }}"
       changed_when: true
       when: found.rc != 0 or (agent_home ~ '/.local/bin/nucleate mcp') not in found.stdout
+
+# The host's nucleate config names the shared nucleus, and only that. With
+# no environment on the host, nothing on the box reads it (nucleated names
+# each nucleus itself), and one this playbook wrote before would name a
+# nucleus nobody uses.
+- name: Remove the host's nucleate config on a box with no environment on the host
+  become: true
+  become_user: "{{ agent_user }}"
+  ansible.builtin.file:
+    path: "{{ agent_home }}/.config/nucleate/config.toml"
+    state: absent
+  when: nucarium_host_envs | length == 0
 
 - name: Each container environment's own nucleus
   ansible.builtin.import_tasks: container-nucleus.yml

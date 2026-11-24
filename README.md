@@ -30,7 +30,8 @@ read, but it has not been run end to end on real hardware.
   `.seeds/`. [`nucleate`](https://github.com/nucarium/nucarium-cli) manages it:
   each session starts empty and adds the repositories it needs as git
   worktrees, and a session's folder is removed only when nothing in it is
-  unsaved.
+  unsaved. The environments on the host share it; a box whose environments
+  all run in containers has none, and leaves one it had before as it is.
 - **Agent servers.** One Claude Code Remote Control server per environment
   (a Claude login), each a systemd user service that waits for the network
   and restarts itself.
@@ -212,7 +213,7 @@ Roles run in this order. Each has a tag of the same name.
 | `cloud_parity` | What a Claude Code cloud session has: Playwright's Chromium (for `playwright_version`) and its system libraries in `/opt/pw-browsers`, Chrome for Testing, Node under `/opt`, the Python tools, Rust, Java with Maven and Gradle, the C/C++ tools, `docker` on Podman, PostgreSQL and Redis, the cloud session's variables for login shells, and pnpm's lock folders at every login |
 | `broker` | The GitHub App key and the timer that mints a fresh GitHub token every 20 minutes; the HCP Terraform token if used |
 | `claude` | Claude Code and, for each login, its settings file: sandbox (required, with no unsandboxed retry, the paths it may write, and the hosts its environment's `network` allows; off in a container, which is the boundary there), update channel, deny rules, the session hook (GitHub token and the environment's variables, root's, in `/usr/local/lib/nucarium/session-env.sh`) and the `nucleated hook` entries. Also your `agent-context/` files |
-| `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. Creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server for each login on the host. For each container environment, its own nucleus, `~/workspace-<name>`, made and cloned on the host only while it is new, with its `.claude/`, `AGENTS.md`, `CLAUDE.md` and `.mcp.json` |
+| `workspace` | Downloads the pinned release of `nucleate` and `nucleated`, verifies its SHA-256, and installs both for the agent user. With an environment on the host, creates the nucleus with `nucleate init`, makes each repository available with `nucleate clone`, and registers the worktree hooks and the `nucleate` MCP server for each login on the host; with none, makes no nucleus and removes the host's `nucleate` config, leaving an existing `~/workspace` alone. For each container environment, its own nucleus, `~/workspace-<name>`, made and cloned on the host only while it is new, with its `.claude/`, `AGENTS.md`, `CLAUDE.md` and `.mcp.json` |
 | `env_runtime` | For environments with `runtime: container`: their base image, Ubuntu 24.04 with what a Claude Code cloud session has, for root, built by the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and the pins in `group_vars/all.yml` as `localhost/nucarium-base:<hash>`, and tagged `:current`, built again only when the Containerfile or a pin changes; each one's two networks and its proxy; the builder of their images (`nucarium-env-build`, with the agent user's units `nucarium-env-build@<name>` and `nucarium-env-check@<name>`); and the box's Git identity, signing key and packages token as the containers see them, root's, in `/etc/nucarium/box/`, or an environment's own identity and signing key in `/etc/nucarium/environments/<name>/box/`; and each one's secret variables, as the agent user's Podman secrets. Does nothing on a box with no such environment. Runs before `env_setup` |
 | `env_setup` | Each environment's variables, setup script, start script, repository list and runtime, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which records how the script went in `/var/lib/nucarium/environments/<name>.setup.json` and never restarts an agent server. On the host it runs the script at boot and whenever it changes. In a container it builds the environment's image, `localhost/nucarium-env-<name>`, from its base image and script, on its network, whenever one of them, the variables or the network changes, and at boot does nothing when the image is up to date. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
 | `agent_servers` | One agent server per entry in `environments`, under one shared memory cap: on the host `agent-server@<name>.service`, which waits while its environment's setup script runs; in a container `agent-env-<name>.service`, a quadlet unit, root's, that starts the environment's image with its own nucleus and the box's tools mounted, and never the shared nucleus. Only the unit of an environment's `runtime` is enabled, the two never run at once, and a switch takes effect when the running one stops by itself. Enabled, not started |
@@ -374,8 +375,9 @@ sudo systemctl restart nucarium-env-setup@main.service   # run it again (in a co
 ## Optional: `agent-context/`
 
 If this folder exists beside the playbook, its contents are copied to the
-agent user: `AGENTS.md` to the nucleus (`~/workspace/AGENTS.md`), `CLAUDE.md`
-to each login's configuration folder, and `skills/` to each login's `skills/`.
+agent user: `AGENTS.md` to each nucleus (`~/workspace/AGENTS.md` and each
+container environment's), `CLAUDE.md` to each login's configuration folder,
+and `skills/` to each login's `skills/`.
 
 ## Secrets
 
