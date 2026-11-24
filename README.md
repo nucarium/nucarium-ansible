@@ -80,7 +80,10 @@ read, but it has not been run end to end on real hardware.
   permission prompt is approved, even with `network: none`. A script or a
   variable's value with `{{`, `{%` or `{#` in it (`${#list[@]}`,
   `--format '{{.Names}}'`) needs `!unsafe` after its key, as in
-  `setup_script: !unsafe |`, or Ansible reads it as a template.
+  `setup_script: !unsafe |`, or Ansible reads it as a template. In a
+  container, what a setup or start script exports in a file in
+  `/etc/profile.d` reaches the agent server and every session, as in a
+  cloud session.
 - **A session that feels like a cloud session.** Agents find what a Claude
   Code cloud session gives them, in the same places: Playwright's Chromium
   in `/opt/pw-browsers` with its system libraries, Chrome for Testing at

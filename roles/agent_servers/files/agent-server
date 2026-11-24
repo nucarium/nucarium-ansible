@@ -56,6 +56,25 @@ if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && [ -r "${AGENT_SERVER_START
   fi
 fi
 
+# In a container, what a login shell has: /etc/profile, which sources
+# /etc/profile.d/*.sh, where a setup or start script puts PATH and service
+# settings for every session, as in a cloud session. The server and every
+# session it starts inherit it. An operator's file may fail or use an unset
+# variable without stopping the server, and the unit's PATH, which holds the
+# box's own tools, stays in it whatever a file does to PATH.
+if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && [ -r /etc/profile ]; then
+  unit_path=$PATH
+  set +eu
+  # shellcheck disable=SC1091 # the image's, not this repository's
+  . /etc/profile
+  set -eu
+  case ":$PATH:" in
+    *":$unit_path:"*) ;;
+    *) PATH="$PATH:$unit_path" ;;
+  esac
+  export PATH
+fi
+
 # A repository added to the environment's list (its repos, else the box's)
 # after the container's own nucleus was made is cloned here, inside the
 # container: the host runs no git in this nucleus but nucleated's, which

@@ -165,9 +165,12 @@ github_app_installation_id: "12345678"
 #                  environment's variables and network, and without the
 #                  nucleus. What it writes, /root included, is in every
 #                  session; what it starts is not running, which is what
-#                  start_script is for. Its output is in the agent user's
-#                  journal (journalctl --user -u nucarium-env-build@<name>).
-#                  It does not get the secret variables.
+#                  start_script is for. What it exports in a file in
+#                  /etc/profile.d reaches the agent server and every
+#                  session, as in a cloud session. Its output is in the
+#                  agent user's journal (journalctl --user -u
+#                  nucarium-env-build@<name>). It does not get the secret
+#                  variables.
 #
 # Ansible reads {{, {% and {# in a value as a template, and a script often
 # has them: ${#list[@]}, or docker ps --format '{{.Names}}'. Write !unsafe
@@ -230,7 +233,9 @@ github_app_installation_id: "12345678"
 #                    for the services the setup script installed (a database
 #                    server, say), which are not running otherwise. Up to five
 #                    minutes; its output is in the server's tmux session,
-#                    and one that fails still lets the server start.
+#                    and one that fails still lets the server start. What it
+#                    exports in a file in /etc/profile.d reaches the server
+#                    and every session.
 #
 # Changing these needs `--tags env_runtime,env_setup,workspace,agent_servers`;
 # the container takes them up at its next start. For example:
