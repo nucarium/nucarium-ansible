@@ -21,6 +21,7 @@
     - ../roles/agent_servers/vars/main.yml
     - ../vars/sandbox.yml
     - ../vars/runtime.yml
+    - ../vars/architecture.yml
   vars:
     render_dir: "{{ playbook_dir }}/../out/render"
     agent_home: /home/{{ agent_user }}
@@ -67,6 +68,12 @@
     nut_password:
       content: "{{ 'example-monitor-password' | b64encode }}"
   tasks:
+    # No box to ask, so the reference build's architecture, unless the run
+    # names another (-e nucarium_machine=aarch64).
+    - name: Render for an x86_64 box
+      ansible.builtin.set_fact:
+        nucarium_machine: x86_64
+
     # The same check site.yml makes first. scripts/check also runs this
     # playbook with entries it must refuse.
     - name: Check each environment's settings
@@ -860,6 +867,7 @@
       ansible.builtin.copy:
         content: |
           nucleate_url: {{ workspace_nucleate_url }}
+          nucleate_sha256: {{ workspace_nucleate_sha256 }}
           base_image: {{ env_runtime_base_ref }}
           day2_claude_dirs: {{ day2_claude_dirs | join(' ') }}
           clone_urls: {% for item in repos %}https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git -> .repos/{{ item | basename }}.git {% endfor %}

@@ -12,7 +12,11 @@
 # home; tests/render.yml checks the role feeds every ARG from its pin.
 # The layers run from the slowest and least often changed to the quickest,
 # so a new pin rebuilds only what follows it.
-FROM docker.io/library/ubuntu:24.04@sha256:9a04f13b3f80ef056361e30868593b1cfd2279fe19e4081cb93a90bf56819d6a
+#
+# It builds for the box's own architecture, amd64 or arm64: the digest below
+# is Ubuntu's multi-architecture index, from which Podman takes the box's
+# image, and each download below names the architecture dpkg reports.
+FROM docker.io/library/ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
 
 # Ubuntu's packages, and the GitHub CLI from its own package source. A
 # package's install never starts its service (policy-rc.d), so PostgreSQL and
@@ -29,7 +33,7 @@ RUN set -eux; \
     curl -fsSL -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
       https://cli.github.com/packages/githubcli-archive-keyring.gpg; \
     printf '%s\n' 'Types: deb' 'URIs: https://cli.github.com/packages' 'Suites: stable' \
-      'Components: main' 'Architectures: amd64' \
+      'Components: main' "Architectures: $(dpkg --print-architecture)" \
       'Signed-By: /etc/apt/keyrings/githubcli-archive-keyring.gpg' \
       > /etc/apt/sources.list.d/github-cli.sources; \
     apt-get update; \
@@ -48,7 +52,8 @@ RUN set -eux; \
       PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin PIPX_MAN_DIR=/usr/local/share/man \
         pipx install "$tool"; \
     done; \
-    curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64; \
+    curl -fsSL -o /usr/local/bin/yq \
+      "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture)"; \
     chmod 0755 /usr/local/bin/yq
 
 # Rust for root, with rustup's default profile.
@@ -62,7 +67,7 @@ RUN set -eux; \
 ARG GO_VERSION
 RUN set -eux; \
     test -n "$GO_VERSION"; \
-    file="go$GO_VERSION.linux-amd64.tar.gz"; \
+    file="go$GO_VERSION.linux-$(dpkg --print-architecture).tar.gz"; \
     curl -fsSL -o "/tmp/$file" "https://dl.google.com/go/$file"; \
     sum=$(curl -fsSL "https://dl.google.com/go/$file.sha256"); \
     echo "$sum  /tmp/$file" | sha256sum -c -; \
@@ -77,12 +82,13 @@ RUN set -eux; \
 ARG NODE_VERSION
 RUN set -eux; \
     test -n "$NODE_VERSION"; \
+    case $(dpkg --print-architecture) in amd64) arch=x64 ;; *) arch=$(dpkg --print-architecture) ;; esac; \
     curl -fsSL -o /tmp/node-index.json https://nodejs.org/dist/index.json; \
     for major in "$NODE_VERSION" 22; do \
       [ -e "/opt/node$major" ] && continue; \
       release=$(jq -r --arg line "v$major." 'map(.version | select(startswith($line))) | first' /tmp/node-index.json); \
       test "$release" != null; \
-      dir="node-$release-linux-x64"; \
+      dir="node-$release-linux-$arch"; \
       curl -fsSL -o "/tmp/$dir.tar.xz" "https://nodejs.org/dist/$release/$dir.tar.xz"; \
       curl -fsSL -o /tmp/SHASUMS256.txt "https://nodejs.org/dist/$release/SHASUMS256.txt"; \
       (cd /tmp && grep " $dir.tar.xz\$" SHASUMS256.txt | sha256sum -c -); \
@@ -118,13 +124,14 @@ RUN set -eux; \
 ARG CHROME_FOR_TESTING_VERSION
 RUN set -eux; \
     test -n "$CHROME_FOR_TESTING_VERSION"; \
+    case $(dpkg --print-architecture) in amd64) platform=linux64 ;; *) platform=linux-$(dpkg --print-architecture) ;; esac; \
     dir="/opt/chrome-for-testing-$CHROME_FOR_TESTING_VERSION"; \
     mkdir -p "$dir"; \
-    curl -fsSL -o /tmp/chrome-linux64.zip \
-      "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_FOR_TESTING_VERSION/linux64/chrome-linux64.zip"; \
-    unzip -q /tmp/chrome-linux64.zip -d "$dir"; \
-    ln -sf "$dir/chrome-linux64/chrome" /usr/bin/google-chrome; \
-    rm /tmp/chrome-linux64.zip
+    curl -fsSL -o "/tmp/chrome-$platform.zip" \
+      "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_FOR_TESTING_VERSION/$platform/chrome-$platform.zip"; \
+    unzip -q "/tmp/chrome-$platform.zip" -d "$dir"; \
+    ln -sf "$dir/chrome-$platform/chrome" /usr/bin/google-chrome; \
+    rm "/tmp/chrome-$platform.zip"
 
 # Playwright's Chromium and its system libraries in /opt/pw-browsers, with
 # the box's own installer.

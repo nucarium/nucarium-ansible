@@ -353,11 +353,14 @@ ups_ondelay: 120
 # ---------------------------------------------------------------------------
 
 # The release of nucleate (the workspace CLI) and nucleated (the box daemon)
-# to install, from github.com/nucarium/nucarium-cli, and the SHA-256 of its Linux
-# archive as published beside it on the releases page. The download is
-# refused unless it matches. Change both together.
+# to install, from github.com/nucarium/nucarium-cli, and the SHA-256 of each
+# of its Linux archives as published beside it on the releases page:
+# nucleate_sha256 for x86_64, nucleate_sha256_aarch64 for aarch64 (arm64).
+# A box downloads its own architecture's archive and refuses it unless it
+# matches. Change all three together.
 nucleate_version: "0.8.0"
 nucleate_sha256: "8af58aa27d76b2219760052898010aef4d3f16205513b9e3f48173d488d7e201"
+nucleate_sha256_aarch64: "27d8382b786da7b53e8b652c87d1514059cf431dfcf9dbf6f707a82eceb59c80"
 
 # For testing a build of your own: the path, on your workstation, of a
 # .tar.gz holding the two binaries, nucleate and nucleated, at its top level.

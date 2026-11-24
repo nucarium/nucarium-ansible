@@ -5,10 +5,11 @@ name: Pin nucleate
 # That repository's Binaries workflow sends the version and the archives'
 # checksums once the archives are attached to the release. This workflow then:
 #
-#   1. downloads the Linux archive the playbook installs and refuses it unless
-#      it hashes to the checksum it was sent;
-#   2. rewrites nucleate_version and nucleate_sha256 in group_vars/all.yml,
-#      those two lines and nothing else;
+#   1. downloads the two Linux archives the playbook installs, x86_64 and
+#      aarch64, and refuses either unless it hashes to the checksum it was
+#      sent;
+#   2. rewrites nucleate_version, nucleate_sha256 and nucleate_sha256_aarch64
+#      in group_vars/all.yml, those three lines and nothing else;
 #   3. commits that to main as "feat: nucleate X.Y.Z".
 #
 # The commit is a feat, so the push makes a minor release of the recipe, and
@@ -35,11 +36,13 @@ concurrency:
 # refuses a version or a checksum that is not exactly the right shape.
 env:
   VERSION: ${{ github.event.client_payload.version }}
-  # The box is x86_64 Linux (roles/workspace/vars/main.yml), so that archive's
-  # checksum is the one the recipe pins. The other three are sent too and are
-  # not used here.
+  # A box is x86_64 or aarch64 Linux (vars/architecture.yml), so those two
+  # archives' checksums are the ones the recipe pins. The two macOS ones are
+  # sent too and are not used here.
   TARGET: x86_64-unknown-linux-musl
   SHA256: ${{ github.event.client_payload.sha256.x86_64-unknown-linux-musl }}
+  TARGET_AARCH64: aarch64-unknown-linux-musl
+  SHA256_AARCH64: ${{ github.event.client_payload.sha256.aarch64-unknown-linux-musl }}
   SETTINGS: group_vars/all.yml
 
 jobs:
@@ -56,6 +59,10 @@ jobs:
             echo "::error::The checksum sent for $TARGET is not a SHA-256."
             exit 1
           fi
+          if ! [[ $SHA256_AARCH64 =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::The checksum sent for $TARGET_AARCH64 is not a SHA-256."
+            exit 1
+          fi
 
       - uses: actions/checkout@v7
         with:
@@ -66,8 +73,9 @@ jobs:
         run: |
           current=$(sed -n 's/^nucleate_version: "\(.*\)"$/\1/p' "$SETTINGS")
           pinned=$(sed -n 's/^nucleate_sha256: "\(.*\)"$/\1/p' "$SETTINGS")
+          pinned_aarch64=$(sed -n 's/^nucleate_sha256_aarch64: "\(.*\)"$/\1/p' "$SETTINGS")
           if [ "$current" = "$VERSION" ]; then
-            if [ "$pinned" = "$SHA256" ]; then
+            if [ "$pinned" = "$SHA256" ] && [ "$pinned_aarch64" = "$SHA256_AARCH64" ]; then
               echo "The recipe already pins nucleate $VERSION."
               echo "move=false" >> "$GITHUB_OUTPUT"
               exit 0
@@ -75,7 +83,7 @@ jobs:
             # A release asset is never replaced. If one was, every box built
             # from this recipe refuses the download, and that is for a person
             # to see.
-            echo "::error::The recipe pins nucleate $VERSION with a different checksum. Look at that release before changing the pin by hand."
+            echo "::error::The recipe pins nucleate $VERSION with different checksums. Look at that release before changing the pin by hand."
             exit 1
           fi
           newest=$(printf '%s\n' "$current" "$VERSION" | sort -V | tail -n 1)
@@ -97,20 +105,24 @@ jobs:
           repositories: nucarium-cli
           permission-contents: read
 
-      # The same file, from the same address, that the playbook downloads.
-      - name: Download the archive and check it is the one described
+      # The same files, from the same addresses, that the playbook downloads.
+      - name: Download the archives and check they are the ones described
         if: steps.now.outputs.move == 'true'
         env:
           GH_TOKEN: ${{ steps.cli-token.outputs.token }}
         run: |
-          name="nucleate-v$VERSION-$TARGET.tar.gz"
-          gh release download "v$VERSION" --repo nucarium/nucarium-cli --pattern "$name" --dir "$RUNNER_TEMP"
-          echo "$SHA256  $RUNNER_TEMP/$name" | sha256sum --check --quiet
-          # Both programs, at the archive's top level, as the playbook expects.
-          tar -tzf "$RUNNER_TEMP/$name" > "$RUNNER_TEMP/listing.txt"
-          for needed in nucleate nucleated; do
-            grep -qx "$needed" "$RUNNER_TEMP/listing.txt" || { echo "::error::The archive has no $needed."; exit 1; }
-          done
+          check() {
+            name="nucleate-v$VERSION-$1.tar.gz"
+            gh release download "v$VERSION" --repo nucarium/nucarium-cli --pattern "$name" --dir "$RUNNER_TEMP"
+            echo "$2  $RUNNER_TEMP/$name" | sha256sum --check --quiet
+            # Both programs, at the archive's top level, as the playbook expects.
+            tar -tzf "$RUNNER_TEMP/$name" > "$RUNNER_TEMP/listing.txt"
+            for needed in nucleate nucleated; do
+              grep -qx "$needed" "$RUNNER_TEMP/listing.txt" || { echo "::error::$name has no $needed."; exit 1; }
+            done
+          }
+          check "$TARGET" "$SHA256"
+          check "$TARGET_AARCH64" "$SHA256_AARCH64"
 
       - name: Move the pin
         if: steps.now.outputs.move == 'true'
@@ -118,12 +130,14 @@ jobs:
           perl -pi -e '
             s/^nucleate_version: "[^"]*"$/nucleate_version: "$ENV{VERSION}"/;
             s/^nucleate_sha256: "[^"]*"$/nucleate_sha256: "$ENV{SHA256}"/;
+            s/^nucleate_sha256_aarch64: "[^"]*"$/nucleate_sha256_aarch64: "$ENV{SHA256_AARCH64}"/;
           ' "$SETTINGS"
           grep -qx "nucleate_version: \"$VERSION\"" "$SETTINGS"
           grep -qx "nucleate_sha256: \"$SHA256\"" "$SETTINGS"
-          # Those two lines and nothing else, in that one file and no other.
+          grep -qx "nucleate_sha256_aarch64: \"$SHA256_AARCH64\"" "$SETTINGS"
+          # Those three lines and nothing else, in that one file and no other.
           test "$(git status --porcelain --untracked-files=all)" = " M $SETTINGS"
-          test "$(git diff --numstat -- "$SETTINGS" | cut -f1,2)" = "$(printf '2\t2')"
+          test "$(git diff --numstat -- "$SETTINGS" | cut -f1,2)" = "$(printf '3\t3')"
 
       - name: Generate Robot App token for this repository
         if: steps.now.outputs.move == 'true'

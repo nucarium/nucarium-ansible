@@ -49,6 +49,17 @@ ansible-playbook tests/render.yml -e @tests/own-identities.yml -e '{"environment
   "secrets": {"npm_token": "render-only", "environments": {"acme": {"GITHUB_TOKEN": "a", "TF_TOKEN": "b", "NODE_AUTH_TOKEN": "c"},
   "tools": {"API_KEY": "d"}, "docs": {"NODE_AUTH_TOKEN": "e"}}}}'
 
+echo "== each architecture gets its own nucleate archive, checked against its own pin"
+for machine in x86_64 aarch64; do
+  ansible-playbook tests/render.yml -e nucarium_machine=$machine > /dev/null
+  setting=nucleate_sha256
+  [ $machine = aarch64 ] && setting=nucleate_sha256_aarch64
+  pinned=$(sed -n "s/^$setting: \"\(.*\)\"\$/\1/p" group_vars/all.yml)
+  grep -qx "nucleate_url: .*/nucleate-v[^/]*-$machine-unknown-linux-musl[.]tar[.]gz" out/render/derived.txt
+  grep -qx "nucleate_sha256: $pinned" out/render/derived.txt
+  echo "$machine: its archive, and $setting"
+done
+
 echo "== render the container environments' networks and proxies"
 ansible-playbook tests/proxy.yml
 

@@ -1,0 +1,28 @@
+---
+# The box's processor architecture, as Ansible's facts name it. tests/render.yml
+# sets it, having no box to ask.
+nucarium_machine: "{{ ansible_facts.architecture }}"
+
+# The processor architectures the recipe installs for, keyed by that name,
+# with the name each download uses for it. x86_64 is the reference build's;
+# aarch64 (arm64) is community-supported, as the README says. The playbook
+# stops before it changes anything on a box of any other architecture.
+#
+#   deb     Ubuntu's and other package sources, Go and yq.
+#   node    nodejs.org's archives.
+#   chrome  Chrome for Testing's platform, and its archive's folder.
+#   target  The build of nucleate and nucleated (the workspace role).
+nucarium_architectures:
+  x86_64:
+    deb: amd64
+    node: x64
+    chrome: linux64
+    target: x86_64-unknown-linux-musl
+  aarch64:
+    deb: arm64
+    node: arm64
+    chrome: linux-arm64
+    target: aarch64-unknown-linux-musl
+
+# This box's entry, once facts are gathered.
+nucarium_arch: "{{ nucarium_architectures[nucarium_machine] }}"

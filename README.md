@@ -138,13 +138,43 @@ read, but it has not been run end to end on real hardware.
 
 | | |
 |---|---|
-| **Hardware** | An x86_64 mini PC with a TPM and Secure Boot. The reference build is an ASUS NUC 16 Pro with 64 GB of memory and a 2 TB NVMe SSD, on a USB-connected UPS. A virtual machine works with `nut_enabled: false`. |
+| **Hardware** | An x86_64 mini PC with a TPM and Secure Boot. The reference build is an ASUS NUC 16 Pro with 64 GB of memory and a 2 TB NVMe SSD, on a USB-connected UPS. A virtual machine works with `nut_enabled: false`. An aarch64 (arm64) machine with UEFI, a TPM and Secure Boot works too, as community-supported: see [Architectures](#architectures). |
 | **On the box** | Ubuntu Server 26.04 LTS, installed with an encrypted disk. `autoinstall.yml` writes the answers for an unattended install. |
 | **On your workstation** | Ansible, the 1Password CLI (`op`), signed in, and an SSH key. |
 | **Accounts** | A Claude subscription that includes Remote Control, a Tailscale tailnet, a GitHub organisation where you can create a GitHub App, and 1Password. A Nucarium Watch account is optional. |
 
 The guide at [nucarium.dev](https://nucarium.dev) walks through the hardware,
 the BIOS, the accounts and the tests. This README covers the playbook.
+
+### Architectures
+
+The playbook reads the box's processor architecture from Ansible's facts,
+installs that architecture's build of everything it downloads, and stops
+before it changes anything on a box of any other architecture.
+
+| Architecture | Support |
+|---|---|
+| **x86_64** | Supported. It is the reference build's, which the recipe is developed and run on. |
+| **aarch64** (arm64) | Community-supported. |
+
+Community-supported means:
+
+- **The recipe installs arm64 builds.** `nucleate` and `nucleated` come from
+  `nucleate-v<version>-aarch64-unknown-linux-musl.tar.gz`, checked against
+  `nucleate_sha256_aarch64`. Go, Node, yq and Chrome for Testing are their
+  arm64 releases, Playwright fetches its own arm64 Chromium, and the GitHub
+  CLI, HashiCorp and 1Password package sources are asked for arm64
+  packages. A container environment's base image is built from Ubuntu's
+  arm64 image, on the box.
+- **No release is tried on an arm64 box.** The checks in `scripts/check`
+  need no box and are the same for both architectures. A change that breaks
+  arm64 is found by whoever runs it next, not before the release: report it,
+  or send the fix, and it is taken as for any other bug.
+- **The board is yours to choose.** The recipe asks the same of an arm64
+  box as of an x86_64 one: Ubuntu Server 26.04 LTS, installed with UEFI and
+  an encrypted disk, and a TPM 2.0 with Secure Boot, which Clevis needs to
+  unlock the disk at boot (the `tpm` role). Many single-board computers have
+  no TPM, or boot without UEFI, and cannot be a box.
 
 ## Getting the recipe
 
@@ -323,7 +353,7 @@ what a real run would do.
 | Run an environment in its own container, or back on the host | `runtime` on the environment (a container one needs its own `config_dir`) | `--tags env_runtime,env_setup,claude,workspace,agent_servers,day2`. The first build of the base image takes a while. The switch takes effect when the running server stops by itself, or when you restart it; never while a session runs. The first time, sign it in by hand (the closing message says how) |
 | Add a second Claude login | `environments` | `--tags claude,workspace,env_setup,agent_servers,day2`, then sign it in and start it by hand |
 | Change an environment's capacity or the memory cap | `environments`, `agents_memory_*` | `--tags agent_servers`, then restart that server |
-| Upgrade `nucleate` and `nucleated` | `nucleate_version` and `nucleate_sha256` | `--tags workspace` |
+| Upgrade `nucleate` and `nucleated` | `nucleate_version`, `nucleate_sha256` and `nucleate_sha256_aarch64` | `--tags workspace` |
 | Turn Watch on or off, or rotate its token | `watch_target`, the 1Password item | `--tags day2` |
 | Set, change or remove the box's own notifier | `box_notify_url`, the 1Password item | `--tags day2` |
 | Renew the packages token | the 1Password item | `--tags toolchain`, and `env_runtime` too if an environment runs in a container |
@@ -435,7 +465,9 @@ skipped, and renders every template from the example settings into
 receive. It reads `nucleated`'s rendered configuration back as TOML and
 checks it against the settings, checks each environment's sandbox network,
 sources each environment's variables in bash to see every value arrive
-intact, reads back the summary `nucleated` reports, and runs the playbook
+intact, reads back the summary `nucleated` reports, checks that an x86_64
+and an aarch64 box each get their own `nucleate` archive and checksum, and
+runs the playbook
 with environment entries it must refuse. The Build workflow (`.github/workflows/build.yml`) runs the same
 script on every pull request and on `main`.
 
@@ -450,16 +482,20 @@ Choices this recipe makes where the product leaves room:
 - **One organisation per box.** Every entry in `environments` shares the
   `agent` user, the nucleus, its repositories and one GitHub App.
   Environments on one box are not isolated from each other.
-- **Ubuntu Server 26.04 LTS on x86_64.** Other distributions and arm64 boards
-  are not covered.
+- **Ubuntu Server 26.04 LTS on x86_64, or on aarch64 as community-supported**
+  (see [Architectures](#architectures)). Other distributions and
+  architectures are not covered.
 - **1Password is the secret store.** Every secret is read with `op read` on
   your workstation.
 - **One release archive holds both binaries.** `nucleate` and `nucleated`
   are released from `github.com/nucarium/nucarium-cli` as
-  `nucleate-v<version>-x86_64-unknown-linux-musl.tar.gz`, with both at the
-  archive's top level and its SHA-256 published beside it. `nucleate_sha256`
-  must be that checksum; the playbook stops if it is not set. The
-  repository's address is one variable, in `roles/workspace/vars/main.yml`.
+  `nucleate-v<version>-<target>.tar.gz`, one for each architecture
+  (`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`), with both at
+  the archive's top level and its SHA-256 published beside it.
+  `nucleate_sha256` must be the x86_64 archive's checksum and
+  `nucleate_sha256_aarch64` the aarch64 one's; the playbook stops if the
+  box's own is not set. The repository's address is one variable, in
+  `roles/workspace/vars/main.yml`.
 - **The binaries belong to the agent user**, in `~agent/.local/bin`, where
   `nucleated`'s own unit expects them.
 - **An agent server runs inside tmux.** Each environment's server has its
@@ -519,12 +555,12 @@ Nobody copies a checksum by hand either. The two pins follow the releases:
 
 | When | This happens | In |
 |---|---|---|
-| `nucarium-cli` publishes a release of `nucleate` | `nucleate_version` and `nucleate_sha256` in `group_vars/all.yml` move to it, in a commit `feat: nucleate <version>`, which releases the recipe | `pin-nucleate.yml`, here |
+| `nucarium-cli` publishes a release of `nucleate` | `nucleate_version`, `nucleate_sha256` and `nucleate_sha256_aarch64` in `group_vars/all.yml` move to it, in a commit `feat: nucleate <version>`, which releases the recipe | `pin-nucleate.yml`, here |
 | This recipe publishes a release | The installer's repository is told the version and the archive's checksum, and moves the installer's pin | `package.yml`, here, then `pin-box.yml` in `nucarium/nucarium` |
 
-Each side checks what it is told. `pin-nucleate.yml` downloads the Linux
-archive the playbook installs and refuses the pin unless it hashes to the
-checksum it was sent. It also refuses to move the pin backwards, and stops if
+Each side checks what it is told. `pin-nucleate.yml` downloads the two Linux
+archives the playbook installs, x86_64 and aarch64, and refuses the pin
+unless each hashes to the checksum it was sent. It also refuses to move the pin backwards, and stops if
 a version it already pins arrives with a different checksum.
 
 All of it needs the Robot App's two secrets on the repository, `GH_APP_ID`
