@@ -354,7 +354,11 @@ committed to your copy of it.
 - **Where they end up on the box.** The GitHub App key and the Terraform
   token belong to `broker` in `/etc/agent-broker`, mode 600. The backup
   credentials are root's, in `/etc/restic/env`. The packages token is in
-  `~agent/.npmrc`, which is why it can only download. The Watch machine
+  `~agent/.npmrc`, which is why it can only download; a container
+  environment has it in `/etc/nucarium/box/npmrc` for npm and as the agent
+  user's Podman secret `nucarium-npm-token`, which every process in the
+  container gets as `NODE_AUTH_TOKEN` for pnpm. Sessions on the host get
+  `NODE_AUTH_TOKEN` too. The Watch machine
   token is in `~agent/.config/nucleated/token`, written by `nucleate login`.
   The notifier's token, if you gave one, is beside it in `notify-token`,
   mode 600, and is left out of the nightly backup.
@@ -410,7 +414,10 @@ Choices this recipe makes where the product leaves room:
   server exits and systemd starts it again, so the unit is active exactly
   while the server runs. Stopping the unit waits until the server and its
   sessions have exited, so a restart never starts a second server beside one
-  that is still shutting down. `nucleated` reads the unit's state; it never starts
+  that is still shutting down. A container waits the same way before it
+  stops. A server that went without unregistering, after a crash, still
+  counts as serving its folder for several minutes: the next one waits for
+  that to lapse rather than exit. `nucleated` reads the unit's state; it never starts
   or stops a server.
 - **Hooks name their environment.** Each login's `settings.json` registers
   `nucleated hook <event> --env <name>`, so a session is always counted under

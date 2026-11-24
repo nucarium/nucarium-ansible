@@ -75,9 +75,23 @@ if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && ! claude auth status > /de
 fi
 
 cd "$AGENT_SERVER_ROOT"
-exec claude remote-control \
-  --spawn worktree \
-  --no-create-session-in-dir \
-  --no-chrome \
-  --capacity "$AGENT_SERVER_CAPACITY" \
-  --remote-control-session-name-prefix "$AGENT_SERVER_PREFIX"
+# A server that went without unregistering (it crashed, or was stopped
+# before it had gone) still counts as serving this folder for several
+# minutes, and a new one exits at once with 69. Wait for that to lapse
+# rather than exit, which would use up the unit's restarts. Anything else
+# ends the script with the server's own status, as before.
+deadline=$((SECONDS + 1200))
+while :; do
+  status=0
+  claude remote-control \
+    --spawn worktree \
+    --no-create-session-in-dir \
+    --no-chrome \
+    --capacity "$AGENT_SERVER_CAPACITY" \
+    --remote-control-session-name-prefix "$AGENT_SERVER_PREFIX" || status=$?
+  if [ "$status" -ne 69 ] || [ "$SECONDS" -ge "$deadline" ]; then
+    exit "$status"
+  fi
+  echo "Remote Control would not start (69, as while an earlier server of this folder has not lapsed). Trying again in 30 seconds."
+  sleep 30
+done

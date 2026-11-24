@@ -4,16 +4,40 @@
 # host: starts the agent server in a tmux session of its own, and lasts as
 # long as that session does, so the container ends when the server exits by
 # itself and its unit starts it again. Stopping the container hangs up on the
-# server, as closing its terminal would. Look at it with:
+# server, as closing its terminal would, and waits until it has gone. Look at
+# it with:
 #   podman exec -it agent-env-<name> tmux -L agent-<name> attach
 set -euo pipefail
-
 name="${AGENT_SERVER_NAME:?set by the unit}"
 command="${AGENT_SERVER_COMMAND:?set by the unit}"
 socket="agent-$name"
 
+# GitHub Packages' token reaches the container as NODE_AUTH_TOKEN (a Podman
+# secret; env_runtime role), the name GitHub's documentation and most
+# repositories' READMEs give it in the line below. pnpm reads registry
+# credentials only from the user's ~/.npmrc, never from
+# NPM_CONFIG_GLOBALCONFIG or a repository's .npmrc. Written at each start,
+# unless the setup script wrote a line of its own; written with the variable,
+# never its value, so the image and the file hold no token.
+if [ -n "${NODE_AUTH_TOKEN:-}" ] &&
+  ! grep -qs '^//npm\.pkg\.github\.com/:_authToken=' "$HOME/.npmrc"; then
+  # shellcheck disable=SC2016 # the variable is npm's to expand, not ours
+  printf '%s\n' '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' >> "$HOME/.npmrc"
+fi
+
+# Hangs up on the server, then waits for it to exit, within the unit's
+# StopTimeout. A server stopped before it has unregistered still counts as
+# serving its folder for several minutes, and the next one would not start.
+stop() {
+  tmux -L "$socket" kill-server 2> /dev/null || true
+  for _ in $(seq 50); do
+    pgrep -f 'claude remote-control' > /dev/null || break
+    sleep 1
+  done
+  exit 0
+}
 tmux -L "$socket" new-session -d -s "$name" "$command"
-trap 'tmux -L "$socket" kill-server 2> /dev/null || true; exit 0' TERM INT HUP
+trap stop TERM INT HUP
 while tmux -L "$socket" has-session -t "$name" 2> /dev/null; do
   sleep 2 &
   wait $! || true

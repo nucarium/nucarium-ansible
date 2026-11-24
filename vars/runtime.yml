@@ -61,6 +61,13 @@ nucarium_lib_dir: /usr/local/lib/nucarium
 # token file NPM_CONFIG_GLOBALCONFIG names.
 nucarium_box_dir: /etc/nucarium/box
 
+# The Podman secret, the agent user's, that holds the GitHub Packages token
+# (secrets.npm_token) and gives it to every container environment's
+# processes as NODE_AUTH_TOKEN: pnpm reads registry credentials only from a
+# user's ~/.npmrc, where agent-env-hold writes the line that names the
+# variable. Only on a box with an npm token.
+nucarium_npm_secret: nucarium-npm-token
+
 # The folder each container environment's agent server runs in, one per
 # environment and named after it, root's: Claude Code names a Remote Control
 # server after its folder, so each shows in the Claude app under its

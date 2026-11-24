@@ -6,6 +6,9 @@
 # The script and one value hold text Ansible would read as a template, so
 # they are marked !unsafe, as the comment in group_vars/all.yml says.
 nucleate_version: "0.7.0"
+# An npm token, so that the container unit is rendered with its secret.
+secrets:
+  npm_token: render-only
 environments:
   - name: main
     network: limited

@@ -98,3 +98,37 @@
     path: "{{ nucarium_box_dir }}/npmrc"
     state: absent
   when: secrets.npm_token is not defined
+
+# The same token as the agent user's Podman secret, which each container
+# environment's unit gives its processes as NODE_AUTH_TOKEN (Secret= in
+# agent-env.container.j2): in no unit file, on no command line, and not in
+# the image. A changed token reaches a container at its next start.
+- name: The GitHub Packages token as a Podman secret, for the agent user
+  become: true
+  become_user: "{{ agent_user }}"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ agent_uid }}
+  block:
+    - name: Read the one there is
+      ansible.builtin.command: podman secret inspect --showsecret {{ nucarium_npm_secret }}
+      register: env_runtime_npm_secret
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Store the token
+      ansible.builtin.command:
+        argv: [podman, secret, create, --replace, "{{ nucarium_npm_secret }}", "-"]
+        stdin: "{{ secrets.npm_token }}"
+        stdin_add_newline: false
+      changed_when: true
+      no_log: true
+      when:
+        - secrets.npm_token is defined
+        - env_runtime_npm_secret.rc != 0 or (env_runtime_npm_secret.stdout | from_json | first).SecretData != secrets.npm_token
+
+    - name: Remove it when there is none
+      ansible.builtin.command: podman secret rm {{ nucarium_npm_secret }}
+      changed_when: true
+      when: secrets.npm_token is not defined and env_runtime_npm_secret.rc == 0
