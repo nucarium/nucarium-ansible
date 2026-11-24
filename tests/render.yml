@@ -199,6 +199,20 @@
         render_hook: "{{ render_hook_config.stdout | from_json }}"
         render_daemon_config: "{{ render_daemon.stdout | from_json }}"
 
+    # The shared nucleus is the host's environments' own: the nightly backup
+    # names it only on a box with one (restic fails a backup on a path that
+    # is not there), and each container environment's seed files always.
+    - name: Check what the backup saves
+      ansible.builtin.assert:
+        that:
+          - nucarium_host_envs == environments | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='name') | list
+          - ((nucleus_root ~ '/.seeds') in render_backup) == (nucarium_host_envs | length > 0)
+          - ((nucleus_root ~ '/.claude') in render_backup) == (nucarium_host_envs | length > 0)
+          - nucarium_container_envs | map('regex_replace', '^(.*)$', agent_home ~ '/workspace-\\1/.seeds') | difference(render_backup) == []
+        quiet: true
+      vars:
+        render_backup: "{{ lookup('ansible.builtin.file', render_dir ~ '/agent-backup.service').split() }}"
+
     - name: Render each agent server's settings and its Claude Code settings
       ansible.builtin.template:
         src: "{{ outer.1.src }}"

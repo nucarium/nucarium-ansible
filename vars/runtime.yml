@@ -4,6 +4,11 @@
 # The names of the environments that run in a container (runtime: container).
 nucarium_container_envs: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | map(attribute='name') | list }}"
 
+# The names of the others, which run on the host and share its nucleus,
+# {{ agent_home }}/workspace (nucleus_root). With none, the box has no use
+# for that nucleus, and the playbook neither makes it nor fills it.
+nucarium_host_envs: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='name') | list }}"
+
 # The clone address of one entry of repos (the loop variable item): an entry
 # with a slash names its owner (other-org/tools), a bare name belongs to
 # github_org. roles/env_setup/templates/repos.j2 writes the same address.
