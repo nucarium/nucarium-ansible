@@ -142,6 +142,17 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
     CHROME_PATH=/usr/bin/google-chrome \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
 
+# nvm in /opt/nvm, as a cloud session has it, from its own repository at the
+# pinned release's tag. Only there: nothing sources it, so the default Node
+# and PATH stay as above. A setup script that wants another Node runs
+# `. /opt/nvm/nvm.sh && nvm install <version>`.
+ARG NVM_VERSION
+RUN set -eux; \
+    test -n "$NVM_VERSION"; \
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$NVM_VERSION" \
+      https://github.com/nvm-sh/nvm.git /opt/nvm; \
+    test "$(git -C /opt/nvm describe --tags --exact-match)" = "v$NVM_VERSION"
+
 # The box's Git identity, signing and GitHub credential helper, from the
 # folder mounted at /etc/nucarium/box, in root's own global config: nucleate
 # runs git with the user's global config and never the system's, so a
@@ -160,4 +171,5 @@ RUN set -eux; \
     clang --version; cmake --version; ninja --version; \
     psql --version; redis-server --version; sqlite3 --version; gh --version; \
     google-chrome --version; \
-    ls -d /opt/pw-browsers/chromium-*
+    ls -d /opt/pw-browsers/chromium-*; \
+    bash -c '. /opt/nvm/nvm.sh --no-use && nvm --version'

@@ -78,7 +78,8 @@ read, but it has not been run end to end on real hardware.
   from a cloud session: agents are not root, so they cannot install system
   packages or start PostgreSQL and Redis themselves, and the box runs the
   Ubuntu release it was installed with. In a container environment neither
-  is so: agents are root on Ubuntu 24.04, as in a cloud session.
+  is so: agents are root on Ubuntu 24.04, as in a cloud session, and nvm is
+  in `/opt/nvm` for a setup script that wants another Node.
 - **`nucleated`, the box daemon.** One service that sends a heartbeat, records
   when a session starts, works, needs you, stops or fails, fetches the
   repositories, removes finished sessions, and saves uncommitted work to a

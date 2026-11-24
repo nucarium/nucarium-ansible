@@ -27,6 +27,7 @@ env_runtime_base_args:
   GRADLE_VERSION: "{{ gradle_version }}"
   CHROME_FOR_TESTING_VERSION: "{{ chrome_for_testing_version }}"
   PLAYWRIGHT_VERSION: "{{ playwright_version }}"
+  NVM_VERSION: "{{ nvm_version }}"
 
 # The image's tag: the start of a hash of the files that make it and the
 # arguments it is built with, so a change to either builds a new image and

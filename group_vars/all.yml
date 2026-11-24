@@ -300,11 +300,14 @@ node_version: "24"
 #   gradle_version              Gradle, checked against its published sum.
 #
 # The base image of container environments (runtime: container) is built
-# from these same pins and go_version and node_version above; after changing
+# from these same pins and go_version and node_version above, and has nvm
+# at the release nvm_version names, in /opt/nvm as a cloud session has it
+# (nothing sources it: the image's Node stays node_version's). After changing
 # one, `--tags env_runtime` builds it again.
 playwright_version: "1.63.0"
 chrome_for_testing_version: "153.0.8010.12"
 gradle_version: "8.14.3"
+nvm_version: "0.40.8"
 
 # Hosts sandboxed commands may reach beyond what a cloud session allows by
 # default (Claude Code's package-registry, GitHub and cloud-SDK list, kept in
