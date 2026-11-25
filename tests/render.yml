@@ -160,6 +160,9 @@
           - render_config.environment | selectattr('name', 'in', nucarium_container_envs) | map(attribute='root') | list == render_container_nuclei
           - render_config.environment | map(attribute='config_dir') | list == environments | map(attribute='config_dir', default=agent_home ~ '/.claude') | list
           - ('ups' in render_config) == (nut_enabled | bool)
+          # Worktree actions are written only when turned on.
+          - ('worktree_actions' in render_config) == (watch_worktree_actions | bool)
+          - not (watch_worktree_actions | bool) or render_config.worktree_actions == true
           - not (nut_enabled | bool) or render_config.ups.name == ups_name ~ '@localhost'
           - ('notify' in render_config) == (box_notify_url | length > 0)
           - box_notify_url | length == 0 or render_config.notify.url == box_notify_url
