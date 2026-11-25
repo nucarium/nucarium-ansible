@@ -251,7 +251,7 @@
           - render_sandbox.filesystem.allowWrite | select('match', '^~/[.]?(bashrc|profile|gitconfig|npmrc|claude|claude[.]json|docker|ssh|local/bin|local/share/fnm|config)$') | list | length == 0
           - claude_pnpm_lock_dirs | select('match', '^/run/user/' ~ agent_uid ~ '/pnpm-') | list | length == 3
           - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml', '~/.local/state/nucleated'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
-          - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 2 * (repos | length)
+          - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 4 * (repos | length)
           - render_sandbox.excludedCommands | sort == ['docker', 'podman']
           # Nothing of what container environments hold that another owner's
           # may: their own Git settings and keys, the agent user's Podman
@@ -262,6 +262,8 @@
           - render_settings.permissions.allow == ['mcp__nucleate']
           - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
           - render_bare | map('regex_replace', '$', '/config') | difference(render_sandbox.filesystem.denyWrite) | length == 0
+          - render_bare_flat | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
+          - render_bare_flat | map('regex_replace', '$', '/config') | difference(render_sandbox.filesystem.denyWrite) | length == 0
           - env_network in ['none', 'limited', 'full']
           - "env_network != 'limited' or ['api.anthropic.com', 'registry.npmjs.org', 'pypi.org', 'crates.io', 'proxy.golang.org', 'repo1.maven.org', 'registry-1.docker.io', 'archive.ubuntu.com', '*.githubusercontent.com'] | difference(render_network.allowedDomains) | length == 0"
           - env_network != 'limited' or sandbox_extra_allowed_domains | default([]) | difference(render_network.allowedDomains) | length == 0
@@ -276,7 +278,8 @@
         render_settings: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.settings.json') | from_json }}"
         render_sandbox: "{{ render_settings.sandbox }}"
         render_network: "{{ render_sandbox.network }}"
-        render_bare: "{{ repos | map('basename') | map('regex_replace', '^(.*)$', nucleus_root ~ '/.repos/\\1.git') | list }}"
+        render_bare: "{{ repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | map('regex_replace', '^(.*)$', nucleus_root ~ '/.repos/\\1.git') | list }}"
+        render_bare_flat: "{{ repos | map('basename') | map('regex_replace', '^(.*)$', nucleus_root ~ '/.repos/\\1.git') | list }}"
       loop: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | list }}"
       loop_control:
         loop_var: env
@@ -870,7 +873,7 @@
           nucleate_sha256: {{ workspace_nucleate_sha256 }}
           base_image: {{ env_runtime_base_ref }}
           day2_claude_dirs: {{ day2_claude_dirs | join(' ') }}
-          clone_urls: {% for item in repos %}https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git -> .repos/{{ item | basename }}.git {% endfor %}
+          clone_urls: {% for item in repos %}https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git -> .repos/{{ item if '/' in item else github_org ~ '/' ~ item }}.git {% endfor %}
 
         dest: "{{ render_dir }}/derived.txt"
         mode: "0600"

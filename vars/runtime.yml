@@ -14,6 +14,13 @@ nucarium_host_envs: "{{ environments | rejectattr('name', 'in', nucarium_contain
 # github_org. roles/env_setup/templates/repos.j2 writes the same address.
 nucarium_repo_url: "https://github.com/{{ item if '/' in item else github_org ~ '/' ~ item }}.git"
 
+# Where nucleate keeps that entry's bare clone, under the nucleus's .repos:
+# in its owner's folder, <owner>/<name>.git, from nucleate 0.12.0, which
+# moves a nucleus's clones there; at <name>.git before it. The recipe names
+# both, so that it is right whichever release a box runs.
+nucarium_repo_bare: "{{ item if '/' in item else github_org ~ '/' ~ item }}.git"
+nucarium_repo_bare_flat: "{{ item | basename }}.git"
+
 # The first release of nucleate and nucleated in which both check a bare
 # repository's git config (an allowlist of keys) and worktree pointers before
 # they run git there, and run git with core.hooksPath=/dev/null. A container

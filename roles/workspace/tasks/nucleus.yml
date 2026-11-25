@@ -57,7 +57,14 @@
         nucleate clone
         {{ nucarium_repo_url }}
       args:
-        creates: "{{ nucleus_root }}/.repos/{{ item | basename }}.git"
+        creates: "{{ nucleus_root }}/.repos/{{ nucarium_repo_bare }}"
+      # nucleate from 0.12.0 finds a repo it already has, in either layout,
+      # and says already_present. An earlier one keeps its clones at
+      # .repos/<name>.git, which `creates` does not look at, and refuses one
+      # it has as already available: that is not a failure either.
+      register: workspace_clone
+      changed_when: workspace_clone.rc == 0 and not ((workspace_clone.stdout | from_json).already_present | default(false))
+      failed_when: workspace_clone.rc != 0 and 'repo already available' not in workspace_clone.stderr
       loop: "{{ repos }}"
 
     - name: Fetch every repository
