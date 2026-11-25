@@ -1,7 +1,7 @@
 ---
 # A second shape to render: two Claude logins, a repository from another
 # owner, Watch switched off, the Terraform token read from the vault, no UPS,
-# and the box's own notifier with a token.
+# the box's own notifier with a token, and worktree actions on.
 environments:
   - name: main
     capacity: 8
@@ -21,3 +21,4 @@ secret_refs:
   hcp_token: op://Infra/agentbox/hcp-terraform-token
   vault_read_token: op://Infra/agentbox/vault-read-token
   box_notify_token: op://Infra/agentbox/notify-token
+watch_worktree_actions: true

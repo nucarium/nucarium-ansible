@@ -323,6 +323,13 @@ watch_target: hosted
 # Empty: the box posts nowhere.
 box_notify_url: ""
 
+# Whether the box does what Watch asks it to do with a leftover session folder:
+# Push, which puts its branches on GitHub, and Clean up, which removes it
+# (pushing a backup of any unsaved work first, once you confirm). Watch lists
+# the folders either way. false: every action is refused and nothing runs.
+# true needs a nucleated that knows the setting; an older one refuses it.
+watch_worktree_actions: false
+
 # ---------------------------------------------------------------------------
 # UPS
 # ---------------------------------------------------------------------------

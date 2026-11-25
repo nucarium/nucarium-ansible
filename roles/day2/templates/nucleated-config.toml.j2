@@ -16,6 +16,13 @@ target = "hosted"
 # the box.
 target = "none"
 {% endif %}
+{% if watch_worktree_actions | default(false) | bool %}
+
+# Do what Watch asks with a leftover session folder: Push, and Clean up.
+# Left out, every such action is refused. Written only when on, for a
+# nucleated too old to know it.
+worktree_actions = true
+{% endif %}
 {% if nut_enabled | bool %}
 
 # The UPS, as NUT names it. The daemon asks NUT whether the box is running on

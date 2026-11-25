@@ -247,7 +247,7 @@ Roles run in this order. Each has a tag of the same name.
 | `env_runtime` | For environments with `runtime: container`: their base image, Ubuntu 24.04 with what a Claude Code cloud session has, for root, built by the agent user's Podman from `roles/env_runtime/files/base/Containerfile` and the pins in `group_vars/all.yml` as `localhost/nucarium-base:<hash>`, and tagged `:current`, built again only when the Containerfile or a pin changes; each one's two networks and its proxy; the builder of their images (`nucarium-env-build`, with the agent user's units `nucarium-env-build@<name>` and `nucarium-env-check@<name>`); and the box's Git identity, signing key and packages token as the containers see them, root's, in `/etc/nucarium/box/`, or an environment's own identity and signing key in `/etc/nucarium/environments/<name>/box/`; and each one's secret variables, as the agent user's Podman secrets. Does nothing on a box with no such environment. Runs before `env_setup` |
 | `env_setup` | Each environment's variables, setup script, start script, repository list and runtime, root's, in `/etc/nucarium/environments/<name>/`, and `nucarium-env-setup@<name>.service`, which records how the script went in `/var/lib/nucarium/environments/<name>.setup.json` and never restarts an agent server. On the host it runs the script at boot and whenever it changes. In a container it builds the environment's image, `localhost/nucarium-env-<name>`, from its base image and script, on its network, whenever one of them, the variables or the network changes, and at boot does nothing when the image is up to date. Also `<name>.json` beside it, the summary `nucleated` reports to Watch: the network, the repositories, and how many hosts and variables, never their values |
 | `agent_servers` | One agent server per entry in `environments`, under one shared memory cap: on the host `agent-server@<name>.service`, which waits while its environment's setup script runs; in a container `agent-env-<name>.service`, a quadlet unit, root's, that starts the environment's image with its own nucleus and the box's tools mounted, and never the shared nucleus. Only the unit of an environment's `runtime` is enabled, the two never run at once, and a switch takes effect when the running one stops by itself. Enabled, not started |
-| `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name and `box_notify_url`, its unit, and the sign-in to Nucarium Watch if you gave a token, the configuration its hook reads inside a container (`~/.config/nucleated-hook/`, no token), and, with a container environment, its check of each repository's git config enforced. Also the two jobs the daemon does not own: a weekly cleanup of container images (the environments' old image tags included), the pnpm store and the journal, and the nightly encrypted backup if configured |
+| `day2` | `nucleated`: its configuration, generated from `environments`, the UPS's name, `box_notify_url` and `watch_worktree_actions`, its unit, and the sign-in to Nucarium Watch if you gave a token, the configuration its hook reads inside a container (`~/.config/nucleated-hook/`, no token), and, with a container environment, its check of each repository's git config enforced. Also the two jobs the daemon does not own: a weekly cleanup of container images (the environments' old image tags included), the pnpm store and the journal, and the nightly encrypted backup if configured |
 
 ## Reporting to Nucarium Watch
 
@@ -280,6 +280,10 @@ token.
 
 To rotate a token: mint a new one, update the 1Password item, revoke the old
 one in the Watch console, and run `ansible-playbook site.yml --tags day2`.
+
+Watch lists the session folders the box keeps. Set `watch_worktree_actions:
+true` in `group_vars/all.yml` to let Watch's **Push** and **Clean up** run on
+them; it is false by default, and then the box refuses each one.
 
 ### When Watch cannot be reached
 
@@ -356,6 +360,7 @@ what a real run would do.
 | Upgrade `nucleate` and `nucleated` | `nucleate_version`, `nucleate_sha256` and `nucleate_sha256_aarch64` | `--tags workspace` |
 | Turn Watch on or off, or rotate its token | `watch_target`, the 1Password item | `--tags day2` |
 | Set, change or remove the box's own notifier | `box_notify_url`, the 1Password item | `--tags day2` |
+| Let Watch push or clean up the box's leftover session folders | `watch_worktree_actions` | `--tags day2` |
 | Renew the packages token | the 1Password item | `--tags toolchain`, and `env_runtime` too if an environment runs in a container |
 
 The playbook never restarts an agent server, because that ends its sessions.

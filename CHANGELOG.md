@@ -4,6 +4,34 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## Watch's actions on leftover session folders
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+Watch lists the session folders a box keeps, with **Push** and **Clean up**
+on each. A box runs them only when its settings say so.
+
+### Settings added
+
+| Setting | Default | What it is |
+|---|---|---|
+| `watch_worktree_actions` | `false` | Whether the box does what Watch asks with a leftover session folder: Push, and Clean up. `true` writes `worktree_actions = true` into `nucleated`'s configuration; `false` writes nothing, and the box refuses every such action. `true` needs a `nucleated` that knows the setting: an older one refuses its configuration. |
+
+No setting is renamed or removed, and a settings file without it works as it
+is.
+
+### Roles and tags
+
+| Role | What changed |
+|---|---|
+| `day2` | Writes `worktree_actions = true` into `nucleated`'s configuration when `watch_worktree_actions` is true. |
+
+### A box built with an earlier copy of the recipe
+
+Nothing to do: the setting is off unless you turn it on. To turn it on, set
+`watch_worktree_actions: true` and run `ansible-playbook site.yml --tags day2`.
+
 ## Environments in their own container
 
 This entry has no version number of its own: the release that carries it is
