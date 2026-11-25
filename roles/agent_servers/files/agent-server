@@ -117,6 +117,35 @@ if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && ! claude auth status > /de
   done
 fi
 
+# The nucleus, where every session's folder is, is trusted for this login, as
+# answering Claude's trust prompt there would. On the host the server runs in
+# the nucleus and its first start answers the prompt; a container's server
+# runs in a folder of its own, so a session brought back in its own folder
+# (claude remote-control --session-id) was refused as untrusted. Written from
+# inside the container: its login is not the host's to touch.
+if [ "${AGENT_SERVER_RUNTIME:-host}" = container ]; then
+  python3 - "${CLAUDE_CONFIG_DIR:?set by the unit}/.claude.json" "$AGENT_SERVER_NUCLEUS" << 'PY' ||
+import json, os, sys
+
+path, folder = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        config = json.load(f)
+except FileNotFoundError:
+    config = {}
+entry = config.setdefault("projects", {}).setdefault(folder, {})
+if entry.get("hasTrustDialogAccepted") is not True:
+    entry["hasTrustDialogAccepted"] = True
+    mode = os.stat(path).st_mode & 0o777 if os.path.exists(path) else 0o600
+    tmp = path + ".nucarium-tmp"
+    with open(tmp, "w") as f:
+        json.dump(config, f, indent=2)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+PY
+    echo "Could not trust $AGENT_SERVER_NUCLEUS for this login; a session brought back in its own folder will be refused."
+fi
+
 cd "$AGENT_SERVER_ROOT"
 # A server that went without unregistering (it crashed, or was stopped
 # before it had gone) still counts as serving this folder for several
