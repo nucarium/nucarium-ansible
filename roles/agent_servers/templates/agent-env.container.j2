@@ -132,6 +132,11 @@ WorkingDir={{ nucarium_servers_dir }}/{{ env.name }}
 Exec={{ nucarium_lib_dir }}/agent-env-hold
 # Time for the sessions to finish what they are writing.
 StopTimeout=60
+# Every thread counts. Twenty sessions, each with its tools, builds and test
+# runs, go well past Podman's default of 2048; at the limit nothing in the
+# container can start, the server's own keeper included, and every session
+# ends with it. The box's memory cap still bounds what they can use.
+PidsLimit=65536
 
 [Service]
 # Inside the box's memory cap, with every other agent server.
