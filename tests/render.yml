@@ -595,6 +595,18 @@
         loop_var: env
         label: "{{ env.name }}.agent-env.container"
 
+    - name: Check a container environment can run many sessions' processes
+      ansible.builtin.assert:
+        that:
+          - "'PidsLimit=65536' in render_lines"
+        quiet: true
+      vars:
+        render_lines: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.agent-env.container').split('\n') | map('trim') | list }}"
+      loop: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.agent-env.container"
+
     # The files the container gets read-only are the ones agent-env-start
     # will not start it without.
     - name: Check agent-env-start checks every file the container gets read-only
