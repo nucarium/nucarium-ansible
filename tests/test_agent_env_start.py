@@ -62,6 +62,26 @@ class AgentEnvStart(unittest.TestCase):
         with open(self.out) as f:
             self.assertEqual(f.read(), f"NUCARIUM_HOOK_VOLUMES=--volume={hooks}:{hooks}:ro\n")
 
+    def test_lists_the_hooks_of_a_repository_in_an_owner_folder(self):
+        os.makedirs(self.path(".repos/octo/api.git/hooks"))
+        os.makedirs(self.path(".repos/_/tool.git/hooks"))
+        done = self.run_start()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        with open(self.out) as f:
+            listed = f.read()
+        for name in (".repos/web.git/hooks", ".repos/octo/api.git/hooks", ".repos/_/tool.git/hooks"):
+            hooks = self.path(name)
+            self.assertIn(f"--volume={hooks}:{hooks}:ro", listed)
+
+    def test_skips_an_owner_folder_that_is_a_link(self):
+        elsewhere = os.path.join(self.tmp.name, "elsewhere")
+        os.makedirs(os.path.join(elsewhere, "x.git", "hooks"))
+        os.symlink(elsewhere, self.path(".repos/octo"))
+        done = self.run_start()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        with open(self.out) as f:
+            self.assertNotIn("x.git", f.read())
+
     def test_skips_a_repository_whose_hooks_are_a_link(self):
         os.makedirs(self.path(".repos/odd.git"))
         os.symlink(self.path(".seeds"), self.path(".repos/odd.git/hooks"))

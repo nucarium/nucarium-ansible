@@ -88,8 +88,11 @@ fi
 if [ "${AGENT_SERVER_RUNTIME:-host}" = container ] && [ -r "${AGENT_SERVER_REPOS:-}" ]; then
   while read -r url; do
     [ -n "$url" ] || continue
-    repo=${url##*/}
-    [ -e "${AGENT_SERVER_NUCLEUS:?set by the unit}/.repos/$repo" ] && continue
+    # In its owner's folder (nucleate 0.12.0 on), or at .repos/<name>.git.
+    repos="${AGENT_SERVER_NUCLEUS:?set by the unit}/.repos"
+    if [ -e "$repos/${url#https://github.com/}" ] || [ -e "$repos/${url##*/}" ]; then
+      continue
+    fi
     nucleate clone "$url" > /dev/null || echo "Could not clone $url into this environment's nucleus; it is tried again at the next start."
   done < "$AGENT_SERVER_REPOS"
 fi

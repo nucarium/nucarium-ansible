@@ -56,7 +56,12 @@
     - name: Clone the repositories into each new one
       ansible.builtin.command: nucleate --root {{ env_nucleus }} clone {{ nucarium_repo_url }}
       args:
-        creates: "{{ env_nucleus }}/.repos/{{ item | basename }}.git"
+        creates: "{{ env_nucleus }}/.repos/{{ nucarium_repo_bare }}"
+      # As for the host's nucleus: a repo already there is not a failure,
+      # whichever layout the box's nucleate keeps it in.
+      register: workspace_env_clone
+      changed_when: workspace_env_clone.rc == 0 and not ((workspace_env_clone.stdout | from_json).already_present | default(false))
+      failed_when: workspace_env_clone.rc != 0 and 'repo already available' not in workspace_env_clone.stderr
       vars:
         env: "{{ outer.0 }}"
         item: "{{ outer.1 }}"

@@ -30,9 +30,11 @@ claude_nucleated_notifications:
 # repository's hooks and config stay read-only: nucleated runs git there
 # outside the sandbox, and a hook or a setting such as core.fsmonitor,
 # core.sshCommand or core.hooksPath would let an agent's command run
-# unconfined.
+# unconfined. Both places nucleate keeps a clone are named: in its owner's
+# folder (nucleate 0.12.0 on), and at .repos/<name>.git (before it).
 claude_sandbox_deny_write: >-
-  {{ repos | map('basename') | product(['hooks', 'config']) | map('join', '.git/')
+  {{ ((repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\1') | list) + (repos | map('basename') | list))
+  | product(['hooks', 'config']) | map('join', '.git/')
   | map('regex_replace', '^', nucleus_root ~ '/.repos/') | list }}
 
 # Where sandboxed commands may write besides the session folder: the nucleus,

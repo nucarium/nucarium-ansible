@@ -79,13 +79,16 @@ for own in .repos .worktrees; do
 done
 repos_real=$(realpath "$nucleus/.repos")
 
+# A clone is in its owner's folder, .repos/<owner>/<name>.git (or _/ for one
+# with no GitHub owner), from nucleate 0.12.0, and at .repos/<name>.git
+# before it.
 volumes=()
-for repo in "$nucleus"/.repos/*.git; do
+for repo in "$nucleus"/.repos/*.git "$nucleus"/.repos/*/*.git; do
   [ -e "$repo" ] || continue
-  base=${repo##*/}
+  rel=${repo#"$nucleus/.repos/"}
   hooks="$repo/hooks"
-  if ! [[ "$base" =~ ^[A-Za-z0-9._-]+\.git$ ]] || [ -L "$repo" ] || [ -L "$hooks" ] || [ ! -d "$hooks" ] ||
-    [ "$(realpath "$hooks" 2> /dev/null)" != "$repos_real/$base/hooks" ]; then
+  if ! [[ "$rel" =~ ^([A-Za-z0-9-]+/|_/)?[A-Za-z0-9._-]+\.git$ ]] || [ -L "$repo" ] || [ -L "${repo%/*}" ] ||
+    [ -L "$hooks" ] || [ ! -d "$hooks" ] || [ "$(realpath "$hooks" 2> /dev/null)" != "$repos_real/$rel/hooks" ]; then
     echo "agent-env-start: not mounting $hooks read-only: not a repository's own hooks folder" >&2
     continue
   fi
