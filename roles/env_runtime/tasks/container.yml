@@ -94,6 +94,9 @@
     # The setups whose environments have a GitHub identity: they sign with
     # one key, the setup's, so that it is registered once for all its logins.
     env_runtime_identity_setups: "{{ env_runtime_identity_envs | selectattr('setup', 'defined') | map(attribute='setup') | unique | list }}"
+    # In a dry run (--check), the setups whose key would be made by this run
+    # and so is not there to copy, own or fetch.
+    env_runtime_setups_unmade: "{{ env_runtime_setup_keygen.results | default([]) | selectattr('changed') | map(attribute='item') | list if ansible_check_mode else [] }}"
   block:
     - name: Create its folder
       ansible.builtin.file:
@@ -148,6 +151,7 @@
         argv: [ssh-keygen, -q, -t, ed25519, -N, "", -C, "{{ inventory_hostname }}-{{ item }} agent signing", -f, "{{ nucarium_setups_dir }}/{{ item }}/signing"]
         creates: "{{ nucarium_setups_dir }}/{{ item }}/signing"
       loop: "{{ env_runtime_identity_setups }}"
+      register: env_runtime_setup_keygen
 
     # Copied over on every run, so that every environment of the setup signs
     # with the same key.
@@ -161,6 +165,7 @@
       vars:
         env: "{{ outer.0 }}"
       loop: "{{ env_runtime_identity_envs | selectattr('setup', 'defined') | product(['', '.pub']) | list }}"
+      when: outer.0.setup not in env_runtime_setups_unmade
       loop_control:
         loop_var: outer
         label: "{{ outer.0.name }}: signing{{ outer.1 }}"
@@ -178,6 +183,7 @@
       loop: >-
         {{ env_runtime_identity_envs | product([{'suffix': '', 'owner': agent_user, 'mode': '0600'},
         {'suffix': '.pub', 'owner': 'root', 'mode': '0644'}]) | list }}
+      when: outer.0.setup is not defined or outer.0.setup not in env_runtime_setups_unmade
       loop_control:
         loop_var: outer
         label: "{{ outer.0.name }}: signing{{ outer.1.suffix }}"
@@ -217,6 +223,7 @@
         dest: "{{ playbook_dir }}/out/{{ inventory_hostname }}-{{ item }}-signing.pub"
         flat: true
       loop: "{{ env_runtime_identity_setups }}"
+      when: item not in env_runtime_setups_unmade
 
 # A setup none of whose environments has a GitHub identity any more loses
 # its key, as a removed environment loses its folder.
