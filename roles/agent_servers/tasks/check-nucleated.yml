@@ -3,10 +3,20 @@
 # that reads it will ever see. The release that reads it is the one whose
 # nucleated can look inside a container, so the box's nucleated is asked for
 # that, not its version: a release without it, or a build of your own, is
-# never taken for one. The workspace role has already installed the pinned
-# release. Imported by tasks/container.yml before it changes any container,
-# and by tests/render.yml, which scripts/check also runs with a nucleated
-# that does not have it.
+# never taken for one. A whole run installs nucleate_version (or
+# nucleate_local_archive) in the workspace role first; a run of one part
+# (--tags agent_servers) asks whatever is installed. Imported by
+# tasks/container.yml before it changes any container, and by
+# tests/render.yml, which scripts/check also runs with a nucleated that does
+# not have it, and with none.
+- name: Look for nucleated
+  ansible.builtin.stat:
+    path: "{{ agent_servers_nucleated }}"
+  become: true
+  become_user: "{{ agent_user }}"
+  register: agent_servers_nucleated_file
+  when: agent_servers_in_containers | length > 0
+
 - name: Ask nucleated whether it reads each container's own spool
   ansible.builtin.command:
     argv: ["{{ agent_servers_nucleated }}", look, --help]
@@ -18,18 +28,32 @@
   failed_when: false
   when: agent_servers_in_containers | length > 0
 
-# A dry run installs no new release, so the one it asks may be the release a
-# real run replaces.
-- name: Stop if it does not
+# A dry run asks the nucleated it has, so it checks only when this run
+# installs no other: when the workspace role did not run, or would change
+# nothing.
+- name: Stop if nucleated does not read each container's own spool
   ansible.builtin.assert:
     that: agent_servers_look.rc | default(1) == 0
     fail_msg: >-
-      This box's nucleated, from
-      {{ nucleate_local_archive if nucleate_local_archive | length > 0 else 'nucleate ' ~ nucleate_version }},
-      does not read each container's own spool folder, which container
-      environments need: install the first nucleate release after 0.13.0
-      whose nucleated does (it has a look command), or a later one, by
-      setting nucleate_version and its SHA-256s in group_vars/all.yml, and run
-      the playbook again. No container's unit was changed.
+      The nucleated at {{ agent_servers_nucleated }}{{ agent_servers_installed }}
+      {{ 'does not read each container' ~ "'" ~ 's own spool folder' if agent_servers_nucleated_file.stat.exists | default(false) else 'is not there' }}.
+      Container environments need one from the first nucleate release after
+      0.13.0 that does (it has a look command), or a later one:
+      {{ agent_servers_remedy }},
+      {{ 'and run the playbook again' if agent_servers_workspace_ran else 'then run the whole playbook, or the workspace role, which installs it' }}.
+      No container's unit was changed.
     quiet: true
-  when: agent_servers_in_containers | length > 0 and not ansible_check_mode
+  vars:
+    agent_servers_workspace_ran: >-
+      {{ workspace_release is defined and workspace_release is not skipped
+      or workspace_local is defined and workspace_local is not skipped }}
+    agent_servers_remedy: >-
+      {{ 'build nucleate_local_archive from such a release, or clear it and set nucleate_version and its SHA-256s in group_vars/all.yml to one'
+      if nucleate_local_archive | length > 0 else 'set nucleate_version and its SHA-256s in group_vars/all.yml to such a release' }}
+    agent_servers_installed: >-
+      {{ ', from nucleate_local_archive (' ~ nucleate_local_archive ~ '),' if workspace_local is defined and workspace_local is not skipped
+      else ', from nucleate ' ~ nucleate_version ~ ',' if workspace_release is defined and workspace_release is not skipped
+      else '' }}
+  when:
+    - agent_servers_in_containers | length > 0
+    - not ansible_check_mode or not ((workspace_release | default({})) is changed or (workspace_local | default({})) is changed)
