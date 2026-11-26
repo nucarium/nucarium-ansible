@@ -280,6 +280,80 @@ environments:
   - name: main
     capacity: 12
 
+# ---------------------------------------------------------------------------
+# Logins and setups
+# ---------------------------------------------------------------------------
+
+# For a box with several Claude logins and several kinds of work, where each
+# login should be able to work in each kind. In place of environments, list
+# the logins and the setups apart, and each login names the setups it joins.
+# The playbook makes one environment for each pair, named <setup>-<login>.
+# Most boxes need none of this: leave both out and use environments above.
+#
+# To use them, delete the environments: block above (the playbook stops
+# while it is there) and add setups: and logins: here.
+#
+#   setups    The kinds of work. Each has a name (lower-case letters, digits
+#             and hyphens) and any of the keys an environment takes, other
+#             than name, config_dir and capacity: runtime, network,
+#             allowed_hosts, variables, setup_script, repos,
+#             secret_variables, github and start_script, with the same
+#             meaning and the same rules.
+#   logins    The Claude logins. Each has a name, a capacity if not 12, and
+#             setups: the setups it joins, at least one.
+#
+# Each pair is a whole environment: its own agent server, its own config_dir
+# (/home/agent/.claude-<setup>-<login>), its own sign-in, which the closing
+# message lists, and its own environment in Watch. In a container it also
+# has its own nucleus, image and proxy. Every pair is a server that runs all
+# the time, so give each login a capacity that fits the box. A name may be at
+# most 48 characters: shorten the setup's or the login's if a pair's is
+# longer.
+#
+# The values of a setup's secret_variables are given once, for all its
+# logins, as setup_secrets.<setup>.<NAME> in your file of environment
+# secrets (or secrets.setups in a whole secrets given with -e), never as
+# environment_secrets. The pairs of a setup with github share one signing
+# key, the setup's, made once on the box: register it once, as the closing
+# message says.
+#
+# A setup with github or secret_variables needs every setup on the box in a
+# container, as environments do. If a setup gives up its github, its pairs'
+# names and logins stay on the box and may not be used without it: rename
+# the setup or the login, which means new sign-ins.
+#
+# Changing a setup changes every pair of it, with the tags its keys need, as
+# above. Adding or removing a setup on a login, or a login, needs the whole
+# playbook; a pair that goes away stops when its server is idle. For example:
+#
+#   setups:
+#     - name: acme
+#       runtime: container
+#       repos:
+#         - acme/web
+#       secret_variables:
+#         - GITHUB_TOKEN
+#       github:
+#         name: Acme Agent
+#         email: agent@example.com
+#     - name: tools
+#       runtime: container
+#       repos:
+#         - other-org/tools
+#   logins:
+#     - name: alice
+#       capacity: 6
+#       setups: [acme, tools]
+#     - name: bob
+#       setups: [acme]
+#
+# makes acme-alice, tools-alice and acme-bob, with, in the file of
+# environment secrets:
+#
+#   setup_secrets:
+#     acme:
+#       GITHUB_TOKEN: "..."
+
 # A memory cap on all agent servers and their sessions together, so a runaway
 # build cannot take the box, SSH and Tailscale down with it. Above the first
 # figure sessions are slowed; at the second the largest is stopped. These
