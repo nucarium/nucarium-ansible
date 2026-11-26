@@ -21,11 +21,10 @@
   ansible.builtin.fail:
     msg: >-
       group_vars/all.yml:
-      {% for r in container_logins_used.results | selectattr('stat.exists') %}environment {{ r.env.name }}: its
+      {% for r in container_logins_used.results | selectattr('stat.exists') %}{{ nucarium_env_labels[r.env.name] }}: its
       config_dir {{ r.env.config_dir }} has been a container environment's login, which the container
-      could change, so it is never used on the host again: give the environment a new config_dir
-      (a new login, signed in again) to run it on the host; {% endfor %}{% for e in container_logins_misplaced %}environment
-      {{ e.name }}: runtime is container, whose config_dir must be directly in the agent user's home
+      could change, so it is never used on the host again: {{ 'rename the setup or the login' if r.env.setup is defined else 'give the environment a new config_dir' }}
+      (a new login, signed in again) to run it on the host; {% endfor %}{% for e in container_logins_misplaced %}{{ nucarium_env_labels[e.name] }}: runtime is container, whose config_dir must be directly in the agent user's home
       ({{ agent_home }}), and is {{ e.config_dir }}; {% endfor %}
       nothing on the box has been changed.
   when: container_logins_used.results | selectattr('stat.exists') | list | length > 0 or container_logins_misplaced | length > 0

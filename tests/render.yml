@@ -74,8 +74,11 @@
       ansible.builtin.set_fact:
         nucarium_machine: x86_64
 
-    # The same check site.yml makes first. scripts/check also runs this
-    # playbook with entries it must refuse.
+    # What site.yml does first, then the same checks it makes. scripts/check
+    # also runs this playbook with entries it must refuse.
+    - name: Make the environments of logins and setups
+      ansible.builtin.import_tasks: ../tasks/expand-setups.yml
+
     - name: Check each environment's settings
       ansible.builtin.import_tasks: ../tasks/check-environments.yml
 

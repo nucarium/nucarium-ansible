@@ -25,7 +25,7 @@
   ansible.builtin.fail:
     msg: >-
       group_vars/all.yml:
-      {% for r in env_templated.results | select('failed') %}environment {{ environments[r.item.0].name | default(r.item.0 + 1) }}: {{ r.item.1 }}{{ '' if loop.last else ', and ' }}{% endfor %}
+      {% for r in env_templated.results | select('failed') %}{{ nucarium_env_labels[environments[r.item.0].name] | default('environment ' ~ (environments[r.item.0].name | default(r.item.0 + 1))) }}: {{ r.item.1 }}{{ '' if loop.last else ', and ' }}{% endfor %}
       {{ 'has' if env_templated.results | select('failed') | list | length == 1 else 'have' }}
       {{ '{{' }}, {{ '{%' }} or {{ '{#' }} in it, which Ansible reads as a template (see the error above).
       Write !unsafe after the key, as in setup_script: !unsafe |, or before
@@ -35,7 +35,7 @@
 - name: Check each environment's runtime, network, variables and scripts
   ansible.builtin.fail:
     msg: >-
-      group_vars/all.yml: environment {{ env.name | default(ansible_loop.index) }}:
+      group_vars/all.yml: {{ nucarium_env_labels[env.name] | default('environment ' ~ (env.name | default(ansible_loop.index))) if env is mapping else 'environment ' ~ ansible_loop.index }}:
       {{ 'is not a set of keys such as name: and capacity:' if env is not mapping else env_problems | join('; ') }}.
   when: env is not mapping or env_problems | length > 0
   vars:
@@ -59,10 +59,17 @@
     env_host: '^[^\s"''\\,;/]+$'
     # * on its own, on any port: every host.
     env_any_host: '^\*(:[0-9]*)?$'
-    env_unknown_keys: "{{ env.keys() | difference(env_known_keys) | list }}"
+    # What tasks/expand-setups.yml adds to the environment of a login and a
+    # setup, so messages can name them. Never written by hand.
+    env_pair_keys: "{{ ['setup', 'login'] if setups is defined else [] }}"
+    env_unknown_keys: "{{ env.keys() | difference(env_known_keys + env_pair_keys) | list }}"
+    # Its proxy's host name, nucarium-proxy-<name>, must fit in one DNS
+    # label, 63 characters.
+    env_name_max: 48
     env_problems: >-
       {{
         (['it has keys the recipe does not know: ' ~ (env_unknown_keys | join(', ')) ~ ' (it knows ' ~ (env_known_keys | join(', ')) ~ ')'] if env_unknown_keys else [])
+      + (['its name is ' ~ (env.name | string | length) ~ ' characters long, and may be at most ' ~ env_name_max ~ ((': shorten the setup' ~ "'" ~ 's or the login' ~ "'" ~ 's name') if env.setup is defined else '')] if env.name | default('') | string | length > env_name_max else [])
       + ([('runtime is "' ~ env_runtime ~ '", and must be host or container')] if env_runtime not in ['host', 'container'] else [])
       + (['runtime is container, which needs nucleate ' ~ nucleate_minimum_for_containers ~ ' or later, and nucleate_version is ' ~ nucleate_version ~ ': from ' ~ nucleate_minimum_for_containers ~ ' nucleate and nucleated check each repository' ~ "'" ~ 's git config before they run git there, which a container can write'] if env_runtime == 'container' and nucleate_version | string is version(nucleate_minimum_for_containers, '<') else [])
       + (['config_dir is ' ~ env.config_dir ~ ', and must be written plainly: no //, /./, /../ and no / at the end, so that one folder has one spelling'] if env.config_dir | default('', true) | string is match('.*(//|/[.][.]?(/|$)|.+/$)') else [])
@@ -124,15 +131,20 @@
 - name: Check no environment on the host shares the box with one that has secrets of its own
   ansible.builtin.fail:
     msg: >-
-      group_vars/all.yml: environment {{ env_own_secrets | join(', ') }}
-      {{ 'has' if env_own_secrets | length == 1 else 'have' }} github or secret_variables, which need every
-      environment on the box in a container (runtime: container), and {{ env_on_host | join(', ') }}
-      {{ 'is' if env_on_host | length == 1 else 'are' }} on the host: sessions on the host run podman outside
+      group_vars/all.yml: {{ env_kind }} {{ env_own_secrets_named | join(', ') }}
+      {{ 'has' if env_own_secrets_named | length == 1 else 'have' }} github or secret_variables, which need every
+      {{ env_kind }} on the box in a container (runtime: container), and {{ env_on_host_named | join(', ') }}
+      {{ 'is' if env_on_host_named | length == 1 else 'are' }} on the host: sessions on the host run podman outside
       their sandbox, as the user that owns every container's secrets, so they could read them. Put
-      {{ env_on_host | join(', ') }} in a container, or the environments of other owners on a box of their own.
+      {{ env_on_host_named | join(', ') }} in a container, or the {{ env_kind }}s of other owners on a box of their own.
   when: env_own_secrets | length > 0 and env_on_host | length > 0
   vars:
     env_own_secrets: >-
-      {{ (environments | selectattr('github', 'defined') | map(attribute='name') | list
-      + environments | selectattr('secret_variables', 'defined') | selectattr('secret_variables') | map(attribute='name') | list) | unique }}
-    env_on_host: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='name') | list }}"
+      {{ (environments | selectattr('github', 'defined') | list
+      + environments | selectattr('secret_variables', 'defined') | selectattr('secret_variables') | list) | unique }}
+    env_on_host: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | list }}"
+    # With logins and setups, a setup's keys are the same in all its pairs, so
+    # the message names setups.
+    env_kind: "{{ 'setup' if setups is defined else 'environment' }}"
+    env_own_secrets_named: "{{ env_own_secrets | map(attribute='setup' if setups is defined else 'name') | unique | list }}"
+    env_on_host_named: "{{ env_on_host | map(attribute='setup' if setups is defined else 'name') | unique | list }}"

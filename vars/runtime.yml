@@ -4,6 +4,12 @@
 # The names of the environments that run in a container (runtime: container).
 nucarium_container_envs: "{{ environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | map(attribute='name') | list }}"
 
+# How messages name each environment: by its name, or, for one made from a
+# login and a setup (tasks/expand-setups.yml), by both, since its name is
+# worked out from theirs.
+nucarium_env_labels: >-
+  {% set ns = namespace(out={}) %}{% for e in environments if e is mapping and e.name is defined %}{% set ns.out = ns.out | combine({e.name: ('setup ' ~ e.setup ~ ', login ' ~ e.login ~ ' (environment ' ~ e.name ~ ')') if e.setup is defined and e.login is defined else 'environment ' ~ e.name}) %}{% endfor %}{{ ns.out }}
+
 # The names of the others, which run on the host and share its nucleus,
 # {{ agent_home }}/workspace (nucleus_root). With none, the box has no use
 # for that nucleus, and the playbook neither makes it nor fills it.

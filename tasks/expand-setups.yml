@@ -1,0 +1,102 @@
+---
+# Turns logins and setups (group_vars/all.yml) into environments: one for
+# each setup a login lists, named <setup>-<login>, with the setup's keys, the
+# login's capacity and a config_dir of its own. Everything after this reads
+# environments as if each pair had been written there by hand. Without
+# setups or logins it does nothing, and environments is as written.
+# Imported first by site.yml, tagged always so that a run of one part
+# (--tags) sees the same environments and removes none of them, and by
+# tests/render.yml.
+#
+# The shipped settings always hold environments (main), so "environments
+# given beside setups" means an environments that is not that one entry.
+- name: Check the logins and setups
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml: {{ setups_problems | join('; ') }}. Nothing on the box has been changed.
+  when: (setups is defined or logins is defined) and setups_problems | length > 0
+  vars:
+    setups_name: '^[a-z0-9][a-z0-9-]*$'
+    # The keys a setup may have: an environment's, less what belongs to the
+    # login or is worked out for each pair.
+    setups_known_keys: [name, runtime, network, allowed_hosts, variables, setup_script, repos, secret_variables, github, start_script]
+    setups_login_keys: [name, capacity, setups]
+    setups_list: "{{ setups if setups is defined and setups is sequence and setups is not string and setups is not mapping else [] }}"
+    logins_list: "{{ logins if logins is defined and logins is sequence and logins is not string and logins is not mapping else [] }}"
+    setups_names: "{{ setups_list | select('mapping') | map(attribute='name', default='') | map('string') | list }}"
+    logins_names: "{{ logins_list | select('mapping') | map(attribute='name', default='') | map('string') | list }}"
+    setups_shipped_environments: [{name: main, capacity: 12}]
+    setups_problems: >-
+      {% set ns = namespace(out=[], pairs=[]) %}
+      {%- if setups is not defined %}{% set ns.out = ns.out + ['logins needs setups beside it: each login lists the setups it joins'] %}{% endif %}
+      {%- if logins is not defined %}{% set ns.out = ns.out + ['setups needs logins beside it: each login lists the setups it joins'] %}{% endif %}
+      {%- if environments | default([]) != setups_shipped_environments %}{% set ns.out = ns.out + ['environments is set beside logins and setups, which take its place: delete the environments: block'] %}{% endif %}
+      {%- if setups is defined and setups_list | length == 0 %}{% set ns.out = ns.out + ['setups is a list of setups, each with a name:'] %}{% endif %}
+      {%- if logins is defined and logins_list | length == 0 %}{% set ns.out = ns.out + ['logins is a list of logins, each with a name: and the setups: it joins'] %}{% endif %}
+      {%- for s in setups_list %}
+        {%- set label = 'setup ' ~ (s.name if s is mapping and s.name is defined else loop.index) %}
+        {%- if s is not mapping %}{% set ns.out = ns.out + [label ~ ' is not a set of keys such as name: and runtime:'] %}
+        {%- else %}
+          {%- if s.name is not defined or s.name is not string or s.name is not match(setups_name) %}{% set ns.out = ns.out + [label ~ ': name is a short label of lower-case letters, digits and hyphens'] %}{% endif %}
+          {%- set unknown = s.keys() | map('string') | difference(setups_known_keys) | sort %}
+          {%- if unknown %}{% set ns.out = ns.out + [label ~ ': it has keys a setup does not take: ' ~ (unknown | join(', ')) ~ ' (it takes ' ~ (setups_known_keys | join(', ')) ~ '; capacity belongs to a login, and each pair' ~ "'" ~ 's config_dir is worked out)'] %}{% endif %}
+        {%- endif %}
+      {%- endfor %}
+      {%- for n in setups_names | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') %}{% set ns.out = ns.out + ['more than one setup is named ' ~ n] %}{% endfor %}
+      {%- for l in logins_list %}
+        {%- set label = 'login ' ~ (l.name if l is mapping and l.name is defined else loop.index) %}
+        {%- if l is not mapping %}{% set ns.out = ns.out + [label ~ ' is not a set of keys such as name: and setups:'] %}
+        {%- else %}
+          {%- if l.name is not defined or l.name is not string or l.name is not match(setups_name) %}{% set ns.out = ns.out + [label ~ ': name is a short label of lower-case letters, digits and hyphens'] %}{% endif %}
+          {%- set unknown = l.keys() | map('string') | difference(setups_login_keys) | sort %}
+          {%- if unknown %}{% set ns.out = ns.out + [label ~ ': it has keys a login does not take: ' ~ (unknown | join(', ')) ~ ' (it takes ' ~ (setups_login_keys | join(', ')) ~ '; the rest belongs to a setup)'] %}{% endif %}
+          {%- if l.setups is not defined or l.setups is string or l.setups is mapping or l.setups is not sequence or l.setups | length == 0 %}{% set ns.out = ns.out + [label ~ ': setups is a list of the setups it joins, one per line, with at least one'] %}
+          {%- else %}
+            {%- set missing = l.setups | map('string') | reject('in', setups_names) | list %}
+            {%- if missing %}{% set ns.out = ns.out + [label ~ ': setups lists ' ~ (missing | join(', ')) ~ ', which ' ~ ('is not a setup' if missing | length == 1 else 'are not setups')] %}{% endif %}
+            {%- set twice = l.setups | map('string') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | list %}
+            {%- if twice %}{% set ns.out = ns.out + [label ~ ': setups lists ' ~ (twice | join(', ')) ~ ' more than once'] %}{% endif %}
+            {%- for s in l.setups | map('string') | unique %}{% set ns.pairs = ns.pairs + [{'name': s ~ '-' ~ (l.name | string), 'pair': 'setup ' ~ s ~ ' with login ' ~ (l.name | string)}] %}{% endfor %}
+          {%- endif %}
+        {%- endif %}
+      {%- endfor %}
+      {%- for n in logins_names | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') %}{% set ns.out = ns.out + ['more than one login is named ' ~ n] %}{% endfor %}
+      {%- for n in ns.pairs | map(attribute='name') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') %}{% set ns.out = ns.out + [(ns.pairs | selectattr('name', 'equalto', n) | map(attribute='pair') | join(' and ')) ~ ' would both be environment ' ~ n ~ ': rename a setup or a login'] %}{% endfor %}
+      {{- ns.out }}
+
+# As tasks/check-environments.yml does for environments: a script or value
+# with {{ in it would stop the next task with an error about template
+# syntax, so each is tried on its own first, to name it.
+- name: Try each setup's script, variables and hosts as Ansible reads them
+  ansible.builtin.assert:
+    that: setups[item.0][item.1] | default('') | to_json | length > 0
+    quiet: true
+  loop: "{{ range(setups | length) | product(['setup_script', 'start_script', 'variables', 'allowed_hosts', 'network', 'runtime', 'repos', 'secret_variables', 'github']) | list }}"
+  loop_control:
+    label: "{{ setups[item.0].name }}: {{ item.1 }}"
+  register: setups_templated
+  ignore_errors: true
+  when: setups is defined
+
+- name: Stop if Ansible would read one as a template
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml:
+      {% for r in setups_templated.results | select('failed') %}setup {{ setups[r.item.0].name }}: {{ r.item.1 }}{{ '' if loop.last else ', and ' }}{% endfor %}
+      {{ 'has' if setups_templated.results | select('failed') | list | length == 1 else 'have' }}
+      {{ '{{' }}, {{ '{%' }} or {{ '{#' }} in it, which Ansible reads as a template (see the error above).
+      Write !unsafe after the key, as in setup_script: !unsafe |, or before
+      the one variable's value, as in NAME: !unsafe '{{ '{{' }}.Names}}'.
+  when: setups is defined and setups_templated.results | select('failed') | list | length > 0
+
+- name: Make one environment for each setup a login joins
+  ansible.builtin.set_fact:
+    environments: >-
+      {% set ns = namespace(out=[]) %}
+      {%- for l in logins %}{% for s in l.setups | unique %}
+        {%- set pair = s ~ '-' ~ l.name %}
+        {%- set e = (setups | selectattr('name', 'equalto', s) | first) | combine({'name': pair, 'config_dir': '/home/' ~ agent_user ~ '/.claude-' ~ pair, 'setup': s, 'login': l.name}) %}
+        {%- set ns.out = ns.out + [e | combine({'capacity': l.capacity}) if l.capacity is defined else e] %}
+      {%- endfor %}{% endfor %}
+      {{- ns.out }}
+  when: setups is defined
