@@ -42,6 +42,9 @@ echo "== render the templates from the example settings, in four shapes"
 ansible-playbook tests/render.yml
 ansible-playbook tests/render.yml -e @tests/two-logins.yml
 ansible-playbook tests/render.yml -e @tests/three-networks.yml
+# On a box whose nucleated reads no container's own spool folder, each
+# container keeps the shared one.
+ansible-playbook tests/render.yml -e @tests/three-networks.yml -e agent_servers_own_spools=false
 ansible-playbook tests/render.yml -e @tests/own-identities.yml
 # The same, with the environments' secrets inside a whole secrets given
 # with -e, as some operators give every secret.
@@ -96,11 +99,9 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 echo "== refuse environments the recipe cannot set up"
 # Each must stop the playbook before anything is rendered, with a message
 # that says what is wrong. A third argument is the nucleate_version to try
-# it with, the oldest a container environment takes when there is none.
-# shellcheck disable=SC2016  # a template for Ansible, not for the shell
-oldest='{{ nucleate_minimum_for_own_spools }}'
+# it with, 0.7.0 when there is none.
 refuse() {
-  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" -e "nucleate_version=${3:-$oldest}" 2>&1); then
+  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" -e "nucleate_version=${3:-0.7.0}" 2>&1); then
     echo "Accepted, but must be refused: $2"
     exit 1
   fi
@@ -116,8 +117,6 @@ refuse() {
 refuse 'runtime is "docker", and must be host or container' '{"name": "main", "runtime": "docker"}'
 refuse 'network is "open", and must be none, limited or full' '{"name": "main", "network": "open"}'
 refuse 'runtime is container, which needs nucleate 0.7.0 or later, and nucleate_version is 0.6.0' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude-second"}' 0.6.0
-refuse "nucleate_version is 0.13.0: from" '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude-second"}' 0.13.0
-refuse "nucleated reads each container's own spool folder, the only one its container writes" '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude-second"}' 0.13.0
 refuse 'runtime is container, whose config_dir must be a folder of its own named .claude-<something>' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/logins/second"}'
 refuse 'runtime is container, and its config_dir /home/agent/.claude-two is also another environment' '{"name": "one", "runtime": "container", "config_dir": "/home/agent/.claude-two"}, {"name": "two", "config_dir": "/home/agent/.claude-two"}'
 refuse 'runtime is container, which needs a config_dir of its own, such as /home/agent/.claude-main: the first login (~/.claude) stays on the host' '{"name": "main", "runtime": "container"}'
@@ -172,7 +171,7 @@ refuse 'environment acme: start_script has {{, {% or {# in it' "{\"name\": \"acm
 # settings, given with -e; environments stays the shipped one unless it
 # names another.
 refuse_setups() {
-  if out=$(ansible-playbook tests/render.yml -e "$2" -e "nucleate_version=$oldest" 2>&1); then
+  if out=$(ansible-playbook tests/render.yml -e "$2" 2>&1); then
     echo "Accepted, but must be refused: $2"
     exit 1
   fi
@@ -231,7 +230,7 @@ github_envs=out/render-github-envs
 rm -rf "$github_envs" && mkdir -p "$github_envs"
 echo '{"name": "acme", "nucleus": "/home/agent/workspace-acme", "config_dir": "/home/agent/.claude-acme"}' > "$github_envs/acme"
 refuse_recorded() {
-  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" -e "nucarium_github_envs_dir=$PWD/$github_envs" -e "nucleate_version=$oldest" 2>&1); then
+  if out=$(ansible-playbook tests/render.yml -e "{\"environments\": [$2]}" -e "nucarium_github_envs_dir=$PWD/$github_envs" 2>&1); then
     echo "Accepted, but must be refused: $2"
     exit 1
   fi
@@ -247,7 +246,7 @@ refuse_recorded "runs on the host, and this box has had container environments w
 # config_dir are worked out: the way out is renaming one of them.
 echo '{"name": "acme-alice", "nucleus": "/home/agent/workspace-acme-alice", "config_dir": "/home/agent/.claude-acme-alice"}' > "$github_envs/acme-alice"
 if out=$(ansible-playbook tests/render.yml -e '{"setups": [{"name": "acme", "runtime": "container"}], "logins": [{"name": "alice", "setups": ["acme"]}]}' \
-  -e "nucarium_github_envs_dir=$PWD/$github_envs" -e "nucleate_version=$oldest" 2>&1); then
+  -e "nucarium_github_envs_dir=$PWD/$github_envs" 2>&1); then
   echo "Accepted, but must be refused: a pair taking a recorded name"
   exit 1
 fi

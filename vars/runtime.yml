@@ -34,13 +34,6 @@ nucarium_repo_bare_flat: "{{ item | basename }}.git"
 # older nucleate_version.
 nucleate_minimum_for_containers: "0.7.0"
 
-# The first release of nucleated that reads each container environment's own
-# spool folder beside the shared one. A container writes only its own, so the
-# playbook refuses a container environment with an older nucleate_version.
-# The shared one is still read for containers started before the change,
-# which write it until they next start.
-nucleate_minimum_for_own_spools: "0.14.0"
-
 # The files at the root of a container environment's own nucleus
 # ({{ agent_home }}/workspace-<name>, which the workspace role makes) that
 # its container gets read-only and does not start without (agent-env-start

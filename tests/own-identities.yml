@@ -6,9 +6,8 @@
 # a secret variable, and the box's GitHub App and npm token. docs has the
 # box's repositories and GitHub App, and an npm token of its own in place of
 # the box's. The start script holds text Ansible would read as a template,
-# so it is marked !unsafe. The oldest nucleate a container environment
-# takes.
-nucleate_version: "{{ nucleate_minimum_for_own_spools }}"
+# so it is marked !unsafe.
+nucleate_version: "0.7.0"
 # Stand-ins for what the playbook reads from 1Password, and for the file of
 # environment secrets it is given (-e @environment-secrets.yml).
 secrets:

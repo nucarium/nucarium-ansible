@@ -108,9 +108,14 @@ Volume={{ env_config_dir }}:{{ env_config_dir }}
 Volume={{ agent_home }}/.local/share/claude:{{ agent_home }}/.local/share/claude:ro
 Volume={{ agent_home }}/.local/bin:{{ agent_home }}/.local/bin:ro
 # nucleated's hook: its configuration read-only, and the spool it writes,
-# the environment's own, where the hook looks for the shared one.
+# the environment's own where the box's nucleated reads one, where the hook
+# looks for the shared one.
 Volume={{ nucarium_nucleated_hook_dir }}:{{ nucarium_nucleated_hook_dir }}:ro
+{% if agent_servers_own_spools | bool %}
 Volume={{ nucarium_nucleated_spools_dir }}/{{ env.name }}:{{ nucarium_nucleated_state_dir }}/spool
+{% else %}
+Volume={{ nucarium_nucleated_state_dir }}/spool:{{ nucarium_nucleated_state_dir }}/spool
+{% endif %}
 {% if not env_github %}
 # The GitHub App's token; the environment's variables, setup files, nucleate
 # configuration and repository list; the box's helpers; and its Git and npm
