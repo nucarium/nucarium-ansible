@@ -1,0 +1,35 @@
+---
+# Each container writes a spool folder of its own, which only a nucleated
+# that reads it will ever see. The release that reads it is the one whose
+# nucleated can look inside a container, so the box's nucleated is asked for
+# that, not its version: a release without it, or a build of your own, is
+# never taken for one. The workspace role has already installed the pinned
+# release. Imported by tasks/container.yml before it changes any container,
+# and by tests/render.yml, which scripts/check also runs with a nucleated
+# that does not have it.
+- name: Ask nucleated whether it reads each container's own spool
+  ansible.builtin.command:
+    argv: ["{{ agent_servers_nucleated }}", look, --help]
+  become: true
+  become_user: "{{ agent_user }}"
+  register: agent_servers_look
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  when: agent_servers_in_containers | length > 0
+
+# A dry run installs no new release, so the one it asks may be the release a
+# real run replaces.
+- name: Stop if it does not
+  ansible.builtin.assert:
+    that: agent_servers_look.rc | default(1) == 0
+    fail_msg: >-
+      This box's nucleated, from
+      {{ nucleate_local_archive if nucleate_local_archive | length > 0 else 'nucleate ' ~ nucleate_version }},
+      does not read each container's own spool folder, which container
+      environments need: install the first nucleate release after 0.13.0
+      whose nucleated does (it has a look command), or a later one, by
+      setting nucleate_version and its SHA-256s in group_vars/all.yml, and run
+      the playbook again. No container's unit was changed.
+    quiet: true
+  when: agent_servers_in_containers | length > 0 and not ansible_check_mode

@@ -4,3 +4,7 @@
 agent_servers_quadlet_names: >-
   {{ agent_servers_quadlets.files | map(attribute='path') | map('basename')
   | map('regex_replace', '^agent-env-(.*)\.container$', '\1') | list }}
+
+# The box's nucleated, which the workspace role installs and
+# tasks/check-nucleated.yml asks.
+agent_servers_nucleated: "{{ agent_home }}/.local/bin/nucleated"

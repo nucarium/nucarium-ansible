@@ -21,11 +21,15 @@ resolves to one. A box with no container environment is unchanged.
 
 No key is added, renamed or removed.
 
+| Setting | What changed |
+|---|---|
+| `nucleate_version` | A container environment needs the first `nucleate` release after 0.13.0 whose `nucleated` reads each container's own spool folder, or a later one. The playbook asks the box's `nucleated`, and stops on an older one before it changes any container's unit. |
+
 ### Roles and tags
 
 | Role | What changed |
 |---|---|
-| `agent_servers` | Asks the box's `nucleated` whether it reads each container's own spool folder. When it does, makes `~/.local/state/nucleated/spools/<name>/` (the agent user's, mode 700) for each container environment and mounts it in its container where the shared spool was. A container keeps the shared one until it next starts, and `nucleated` reads both. With an older `nucleated`, every container keeps the shared one. |
+| `agent_servers` | Makes `~/.local/state/nucleated/spools/<name>/` (the agent user's, mode 700) for each container environment and mounts it in its container where the shared spool was. A container keeps the shared one until it next starts, and `nucleated` reads both. Stops first when the box's `nucleated` does not read them. |
 | `env_runtime` | Writes the box's addresses, from its network facts read during the run, to `box.json` beside each proxy's rules in `/etc/nucarium/proxy/<name>/`, root's. The proxy reads it again when it changes. It looks a name up once, as it connects, refuses it when any of its addresses is the box's, and otherwise connects to the address it found. It refuses everything while `box.json` cannot be read. The proxy image is built again. A new LAN address takes effect at the next run of the role; it builds no environment image. |
 
 ## Logins and setups

@@ -43,6 +43,9 @@
     # back on the host with nothing running.
     agent_servers_gone: "{{ agent_servers_quadlet_names | difference(agent_servers_in_containers | map(attribute='name')) }}"
   block:
+    - name: Check nucleated reads each container's own spool
+      ansible.builtin.import_tasks: check-nucleated.yml
+
     - name: Create root's folders for the quadlet files and the servers' folders
       become: true
       ansible.builtin.file:
@@ -83,8 +86,8 @@
         loop_var: env
         label: "{{ env.name }}"
 
-    # Mounted into each container, so it has to be there first. The daemon
-    # keeps it private.
+    # The shared one, which a container started before it had its own goes
+    # on writing until it next starts. The daemon keeps it private.
     - name: Create nucleated's spool
       become: true
       become_user: "{{ agent_user }}"
@@ -93,30 +96,6 @@
         state: directory
         mode: "0700"
       when: agent_servers_in_containers | length > 0
-
-    # A container gets a spool folder of its own once the box's nucleated
-    # reads one: the release that does is the one whose nucleated can look
-    # inside a container. The program is asked, not its version, so that a
-    # release without it, or a build of your own, is never taken for one.
-    # An older one reads the shared folder alone, and every container goes
-    # on writing that until a nucleated that reads its own is installed.
-    - name: Ask nucleated whether it reads each container's own spool
-      ansible.builtin.command:
-        argv: ["{{ agent_home }}/.local/bin/nucleated", look, --help]
-      become: true
-      become_user: "{{ agent_user }}"
-      register: agent_servers_look
-      check_mode: false
-      changed_when: false
-      failed_when: false
-      when:
-        - agent_servers_in_containers | length > 0
-        - agent_servers_own_spools is not defined
-
-    - name: Note whether each container gets a spool of its own
-      ansible.builtin.set_fact:
-        agent_servers_own_spools: "{{ agent_servers_look.rc | default(1) == 0 }}"
-      when: agent_servers_own_spools is not defined
 
     # Each container's own, mounted where the shared one would be, so that
     # no container reads or writes another's waiting events. The daemon
@@ -132,7 +111,6 @@
       loop: >-
         {{ ([nucarium_nucleated_spools_dir] if agent_servers_in_containers | length > 0 else [])
         + agent_servers_in_containers | map(attribute='name') | map('regex_replace', '^', nucarium_nucleated_spools_dir ~ '/') | list }}
-      when: agent_servers_own_spools | bool
 
     - name: Write each environment's agent server unit
       become: true

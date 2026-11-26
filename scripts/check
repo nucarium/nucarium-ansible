@@ -42,9 +42,6 @@ echo "== render the templates from the example settings, in four shapes"
 ansible-playbook tests/render.yml
 ansible-playbook tests/render.yml -e @tests/two-logins.yml
 ansible-playbook tests/render.yml -e @tests/three-networks.yml
-# On a box whose nucleated reads no container's own spool folder, each
-# container keeps the shared one.
-ansible-playbook tests/render.yml -e @tests/three-networks.yml -e agent_servers_own_spools=false
 ansible-playbook tests/render.yml -e @tests/own-identities.yml
 # The same, with the environments' secrets inside a whole secrets given
 # with -e, as some operators give every secret.
@@ -117,6 +114,21 @@ refuse() {
 refuse 'runtime is "docker", and must be host or container' '{"name": "main", "runtime": "docker"}'
 refuse 'network is "open", and must be none, limited or full' '{"name": "main", "network": "open"}'
 refuse 'runtime is container, which needs nucleate 0.7.0 or later, and nucleate_version is 0.6.0' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude-second"}' 0.6.0
+# A box whose nucleated does not read each container's own spool folder,
+# or has none: no container environment is set up there. A box with none
+# does not ask it.
+for nucleated in /usr/bin/false "$PWD/out/no-such-nucleated"; do
+  if out=$(ansible-playbook tests/render.yml -e @tests/three-networks.yml -e "render_box_nucleated=$nucleated" 2>&1); then
+    echo "Accepted, but must be refused: a container environment, with $nucleated as nucleated"
+    exit 1
+  fi
+  case "$out" in
+    *"does not read each container's own spool folder"*"No container's unit was changed."*) echo "refused: a container environment, with $nucleated as nucleated" ;;
+    *) printf '%s\n' "$out"; echo "Refused, but without saying why: a container environment, with $nucleated as nucleated"; exit 1 ;;
+  esac
+done
+ansible-playbook tests/render.yml -e render_box_nucleated=/usr/bin/false > /dev/null
+echo "and with no container environment, nucleated is not asked"
 refuse 'runtime is container, whose config_dir must be a folder of its own named .claude-<something>' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/logins/second"}'
 refuse 'runtime is container, and its config_dir /home/agent/.claude-two is also another environment' '{"name": "one", "runtime": "container", "config_dir": "/home/agent/.claude-two"}, {"name": "two", "config_dir": "/home/agent/.claude-two"}'
 refuse 'runtime is container, which needs a config_dir of its own, such as /home/agent/.claude-main: the first login (~/.claude) stays on the host' '{"name": "main", "runtime": "container"}'
