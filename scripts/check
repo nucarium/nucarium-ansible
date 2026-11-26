@@ -53,7 +53,10 @@ echo "== logins and setups render the same files as their environments written b
 ansible-playbook tests/render.yml -e @tests/logins-setups.yml -e @tests/logins-setups-expected.yml
 rm -rf out/render-pairs && cp -R out/render out/render-pairs
 ansible-playbook tests/render.yml -e @tests/logins-setups-by-hand.yml -e @tests/logins-setups-expected.yml
-diff -r out/render-pairs out/render
+# Apart from the closing message: the environments of a setup share its
+# signing key, which it names once, by the setup, where environments
+# written by hand each have their own.
+diff -r -x next-steps.txt out/render-pairs out/render
 echo "the same files"
 # The same, with the setups' secrets inside a whole secrets given with -e.
 ansible-playbook tests/render.yml -e @tests/logins-setups.yml -e @tests/logins-setups-expected.yml -e '{"setup_secrets": {},

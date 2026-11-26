@@ -91,6 +91,9 @@
 - name: The Git settings of each environment with a GitHub identity of its own
   vars:
     env_runtime_identity_envs: "{{ environments | selectattr('name', 'in', env_runtime_container_envs) | selectattr('github', 'defined') | list }}"
+    # The setups whose environments have a GitHub identity: they sign with
+    # one key, the setup's, so that it is registered once for all its logins.
+    env_runtime_identity_setups: "{{ env_runtime_identity_envs | selectattr('setup', 'defined') | map(attribute='setup') | unique | list }}"
   block:
     - name: Create its folder
       ansible.builtin.file:
@@ -118,15 +121,49 @@
         label: "{{ env.name }}"
 
     # Made once and never replaced: its public half is registered on the
-    # environment's GitHub account.
+    # environment's GitHub account. An environment of a setup gets the
+    # setup's key instead, below.
     - name: Create its commit-signing key
       ansible.builtin.command:
         argv: [ssh-keygen, -q, -t, ed25519, -N, "", -C, "{{ inventory_hostname }}-{{ env.name }} agent signing", -f, "{{ nucarium_env_box_dir }}/signing"]
         creates: "{{ nucarium_env_box_dir }}/signing"
-      loop: "{{ env_runtime_identity_envs }}"
+      loop: "{{ env_runtime_identity_envs | rejectattr('setup', 'defined') | list }}"
       loop_control:
         loop_var: env
         label: "{{ env.name }}"
+
+    # A setup's key, in a folder only root reads, made once and never
+    # replaced, as an environment's is.
+    - name: Create the folder of each setup's key
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop: "{{ [nucarium_setups_dir] + env_runtime_identity_setups | map('regex_replace', '^', nucarium_setups_dir ~ '/') | list }}"
+
+    - name: Create each setup's commit-signing key
+      ansible.builtin.command:
+        argv: [ssh-keygen, -q, -t, ed25519, -N, "", -C, "{{ inventory_hostname }}-{{ item }} agent signing", -f, "{{ nucarium_setups_dir }}/{{ item }}/signing"]
+        creates: "{{ nucarium_setups_dir }}/{{ item }}/signing"
+      loop: "{{ env_runtime_identity_setups }}"
+
+    # Copied over on every run, so that every environment of the setup signs
+    # with the same key.
+    - name: Give each environment of a setup the setup's key
+      ansible.builtin.copy:
+        src: "{{ nucarium_setups_dir }}/{{ outer.0.setup }}/signing{{ outer.1 }}"
+        dest: "{{ nucarium_env_box_dir }}/signing{{ outer.1 }}"
+        remote_src: true
+        force: true
+        mode: preserve
+      vars:
+        env: "{{ outer.0 }}"
+      loop: "{{ env_runtime_identity_envs | selectattr('setup', 'defined') | product(['', '.pub']) | list }}"
+      loop_control:
+        loop_var: outer
+        label: "{{ outer.0.name }}: signing{{ outer.1 }}"
 
     # As the box's pair: the key the agent user's, which is root in the
     # container, and the public half root's.
@@ -163,16 +200,40 @@
       no_log: true
 
     # For the closing message: register it as a signing key on the
-    # environment's GitHub account.
+    # environment's GitHub account, once for each setup.
     - name: Copy its public key to the workstation
       ansible.builtin.fetch:
         src: "{{ nucarium_env_box_dir }}/signing.pub"
         dest: "{{ playbook_dir }}/out/{{ inventory_hostname }}-{{ env.name }}-signing.pub"
         flat: true
-      loop: "{{ env_runtime_identity_envs }}"
+      loop: "{{ env_runtime_identity_envs | rejectattr('setup', 'defined') | list }}"
       loop_control:
         loop_var: env
         label: "{{ env.name }}"
+
+    - name: Copy each setup's public key to the workstation
+      ansible.builtin.fetch:
+        src: "{{ nucarium_setups_dir }}/{{ item }}/signing.pub"
+        dest: "{{ playbook_dir }}/out/{{ inventory_hostname }}-{{ item }}-signing.pub"
+        flat: true
+      loop: "{{ env_runtime_identity_setups }}"
+
+# A setup none of whose environments has a GitHub identity any more loses
+# its key, as a removed environment loses its folder.
+- name: List the setups' keys on the box
+  ansible.builtin.find:
+    paths: "{{ nucarium_setups_dir }}"
+    file_type: directory
+  register: env_runtime_setup_keys
+
+- name: Remove the keys of setups that no longer have a GitHub identity
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ env_runtime_setup_keys.files | map(attribute='path')
+    | reject('in', environments | selectattr('name', 'in', env_runtime_container_envs) | selectattr('github', 'defined')
+      | selectattr('setup', 'defined') | map(attribute='setup') | map('regex_replace', '^', nucarium_setups_dir ~ '/') | list) | list }}
 
 - name: Write the GitHub Packages token (download-only)
   ansible.builtin.copy:

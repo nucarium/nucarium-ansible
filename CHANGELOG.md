@@ -25,7 +25,13 @@ the config folder `/home/agent/.claude-<setup>-<login>`. A box without
 | `setup_secrets` | none | The values of each setup's `secret_variables`, as `setup_secrets.<setup>.<NAME>`, in your file of environment secrets (`-e @environment-secrets.yml`), or as `secrets.setups.<setup>.<NAME>` in a whole `secrets` given with `-e`; `setup_secrets` wins where both name one. Every environment of the setup gets them. With setups, `environment_secrets` and `secrets.environments` are not read, and the playbook stops while they hold values. |
 
 Each pair is a whole environment: its own agent server, container, nucleus,
-Watch environment and sign-in.
+Watch environment and sign-in. The pairs of a setup with `github` share one
+commit-signing key, the setup's, made once on the box in
+`/etc/nucarium/setups/<setup>/` (root's, and out of reach of sandboxed
+commands on the host) and copied into each pair's folder on every run. The
+playbook copies its public half to `out/<box>-<setup>-signing.pub`, and the
+closing message asks for it to be registered once. A setup whose pairs no
+longer have `github` loses its key.
 
 ### Settings changed
 
@@ -35,8 +41,13 @@ Watch environment and sign-in.
 
 ### Roles and tags
 
-No role changes. The playbook makes the environments of logins and setups
-before anything else, on every run, `--tags` runs included.
+| Role | What changed |
+|---|---|
+| `env_runtime` | Makes each setup's signing key, copies it into its pairs' folders, fetches its public half once, and removes the keys of setups that no longer have `github`. |
+| `claude` | Sandboxed commands on the host may not read `/etc/nucarium/setups`. |
+
+The playbook makes the environments of logins and setups before anything
+else, on every run, `--tags` runs included.
 
 ### A box built with an earlier copy of the recipe
 

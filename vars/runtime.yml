@@ -130,6 +130,11 @@ nucarium_env_git_credential_helper: >-
 # name; the loop variable is env.
 nucarium_env_box_dir: /etc/nucarium/environments/{{ env.name }}/box
 
+# Where each setup whose environments have a GitHub identity keeps the one
+# commit-signing key they share (<setup>/signing): root's alone. The
+# env_runtime role copies it into each of their folders above.
+nucarium_setups_dir: /etc/nucarium/setups
+
 # Each secret variable of each container environment (secret_variables), as
 # the agent user's Podman secret of that name, which its container gets as
 # the variable (Secret= in agent-env.container.j2): nucarium-env-<env>-<the
