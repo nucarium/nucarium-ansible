@@ -67,6 +67,29 @@ fi
 
 now_ms() { date +%s%3N; }
 
+# At boot the unit starts once the box thinks its network is up, which can
+# be before the router is: a script that downloads anything then finds
+# nothing (nvm, for one, says the version does not exist) and fails. So
+# before a script runs, wait until the internet answers, as the agent server
+# does, for up to ten minutes; a script that needs no internet runs after
+# that anyway. Nothing is recorded while it waits: a stop then leaves the
+# record of the last run as it was.
+network_wait_s=600
+wait_for_network() {
+  local deadline=$((SECONDS + network_wait_s)) said=
+  until curl -s -o /dev/null --max-time 5 https://api.anthropic.com/; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "The internet did not answer for $((network_wait_s / 60)) minutes; the setup script of environment $name runs anyway."
+      return 0
+    fi
+    if [ -z "$said" ]; then
+      echo "Waiting for the internet before the setup script of environment $name runs."
+      said=1
+    fi
+    sleep 5
+  done
+}
+
 # A temporary file in the same folder, renamed over the old one, so a reader
 # sees the last run or this one and never half of either. A stale "running"
 # from a run the box lost power in is simply replaced.
@@ -139,6 +162,7 @@ run_on_host() {
     exit 0
   fi
   local sha started
+  wait_for_network
   sha=$(sha256sum "$script" | cut -d ' ' -f 1)
   started=$(now_ms)
   write_status "{\"state\":\"running\",\"started_at_ms\":$started,\"script_sha256\":\"$sha\"}"
@@ -245,6 +269,7 @@ run_in_container() {
     rm -rf "$build/run"
     [ "$rc" -eq 0 ] || exit "$rc"
   else
+    wait_for_network
     started=$(now_ms)
     write_status "{\"state\":\"running\",\"started_at_ms\":$started,\"script_sha256\":\"$sha\"}"
     echo "Building the image of environment $name with its setup script (sha256 $sha) as localhost/nucarium-env-$name:$tag."

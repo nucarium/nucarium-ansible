@@ -17,8 +17,9 @@ Environment=NUCLEUS_ROOT={{ nucleus_root }}
 # Whose Podman builds a container environment's image.
 Environment=NUCARIUM_AGENT_USER={{ agent_user }}
 ExecStart=/usr/local/sbin/nucarium-env-setup %i
-# The script's own limit is 30 minutes; this only backs it up, with time for
-# a container environment's image to be saved after its script.
+# The script's own limit is 30 minutes, after up to 10 waiting for the
+# internet at boot; this only backs them up, with time for a container
+# environment's image to be saved after its script.
 TimeoutStartSec=45min
 
 [Install]
