@@ -55,7 +55,9 @@ claude_sandbox_deny_in_allowed: >-
 # environments hold that may belong to another owner. Each one's own Git
 # settings, signing key and GitHub token (/etc/nucarium/environments/<name>/box/,
 # a glob the sandbox expands as a session starts, so a folder made later is
-# covered from the next session); the agent user's Podman storage, whose
+# covered from the next session); the signing keys of setups
+# (nucarium_setups_dir), each shared by a setup's environments, which are
+# root's anyway; the agent user's Podman storage, whose
 # secrets/ holds every container environment's secret variables
 # (secrets/filedriver/secretsdata.json, the agent user's rootless graph root
 # being ~/.local/share/containers/storage), and which holds their images and
@@ -68,7 +70,7 @@ claude_sandbox_deny_in_allowed: >-
 # (tasks/check-environments.yml); this holds for a box that gets one later.
 claude_sandbox_github_envs: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('github', 'defined') | list }}"
 claude_sandbox_deny_read: >-
-  {{ (['/etc/nucarium/environments/*/box', '~/.local/share/containers']
+  {{ (['/etc/nucarium/environments/*/box', nucarium_setups_dir, '~/.local/share/containers']
   + (nucarium_github_envs_recorded | default([]) | map(attribute='nucleus') | list)
   + (nucarium_github_envs_recorded | default([]) | map(attribute='config_dir') | list)
   + (claude_sandbox_github_envs | map(attribute='name') | map('regex_replace', '^', agent_home ~ '/workspace-') | list)

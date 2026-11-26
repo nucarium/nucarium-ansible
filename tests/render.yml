@@ -263,7 +263,7 @@
           # may: their own Git settings and keys, the agent user's Podman
           # storage (their secret variables), and the nucleus and login of
           # each with a GitHub identity of its own.
-          - "['/etc/nucarium/environments/*/box', '~/.local/share/containers'] | difference(render_sandbox.filesystem.denyRead) | length == 0"
+          - "['/etc/nucarium/environments/*/box', '/etc/nucarium/setups', '~/.local/share/containers'] | difference(render_sandbox.filesystem.denyRead) | length == 0"
           - render_expected_deny_read is not defined or render_sandbox.filesystem.denyRead == render_expected_deny_read
           - render_settings.permissions.allow == ['mcp__nucleate']
           - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
@@ -875,14 +875,20 @@
 
     # It says to register each environment's own signing key, by the file the
     # playbook copies to out/, and no such key when there is none.
+    # One key for each environment with a GitHub identity, except that the
+    # environments of a setup share the setup's: named once, by the setup.
     - name: Check the closing message names each environment's own signing key
       ansible.builtin.assert:
         that:
-          - render_identity_envs | map(attribute='name') | map('regex_replace', '^(.*)$', 'out/' ~ inventory_hostname ~ '-\\1-signing.pub') | reject('in', render_message) | list == []
+          - render_keys | map('regex_replace', '^(.*)$', 'out/' ~ inventory_hostname ~ '-\\1-signing.pub') | reject('in', render_message) | list == []
+          - render_message | regex_findall('gh ssh-key add out/') | length == render_keys | length
           - render_identity_envs | length > 0 or render_message is not search('-signing[.]pub --type signing --title "' ~ inventory_hostname ~ '-')
         quiet: true
       vars:
         render_message: "{{ lookup('ansible.builtin.file', render_dir ~ '/next-steps.txt') }}"
+        render_keys: >-
+          {{ render_identity_envs | rejectattr('setup', 'defined') | map(attribute='name') | list
+          + render_identity_envs | selectattr('setup', 'defined') | map(attribute='setup') | unique | list }}
 
     - name: Record the values the roles derive
       ansible.builtin.copy:

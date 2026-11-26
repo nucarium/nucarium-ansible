@@ -5,11 +5,13 @@ The box is built. What is left needs you in person:
      ssh {{ agent_user }}@{{ inventory_hostname }} cat .ssh/id_ed25519_signing.pub > {{ inventory_hostname }}-signing.pub
      gh ssh-key add {{ inventory_hostname }}-signing.pub --type signing --title "{{ inventory_hostname }} agent signing"
 {% set identities = environments | selectattr('runtime', 'defined') | selectattr('runtime', 'equalto', 'container') | selectattr('github', 'defined') | list %}
+{% set identity_keys = (identities | rejectattr('setup', 'defined') | map(attribute='name') | zip(identities | rejectattr('setup', 'defined') | map(attribute='github') | map(attribute='email')) | list)
+   + (identities | selectattr('setup', 'defined') | unique(attribute='setup') | map(attribute='setup') | zip(identities | selectattr('setup', 'defined') | unique(attribute='setup') | map(attribute='github') | map(attribute='email')) | list) %}
 {% if identities %}
-   Each environment with a GitHub identity of its own signs with a key of its own, which the playbook copied to out/. Register each on that environment's GitHub account, signed in to gh as that account, whose verified emails must include the environment's email:
-{% for e in identities %}
-     {{ e.name }} ({{ e.github.email }}):
-       gh ssh-key add out/{{ inventory_hostname }}-{{ e.name }}-signing.pub --type signing --title "{{ inventory_hostname }}-{{ e.name }} agent signing"
+   Each environment with a GitHub identity of its own signs with a key of its own, which the playbook copied to out/; the environments of one setup share the setup's. Register each on its GitHub account, signed in to gh as that account, whose verified emails must include its email:
+{% for key in identity_keys %}
+     {{ key.0 }} ({{ key.1 }}):
+       gh ssh-key add out/{{ inventory_hostname }}-{{ key.0 }}-signing.pub --type signing --title "{{ inventory_hostname }}-{{ key.0 }} agent signing"
 {% endfor %}
 {% endif %}
 
