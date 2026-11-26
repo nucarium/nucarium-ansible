@@ -9,12 +9,12 @@
 nucleate_version: "0.7.0"
 secrets:
   npm_token: render-only
-environment_secrets:
-  acme-alice: &acme_secrets
+# Each setup's secret values, given once for all its logins.
+setup_secrets:
+  acme:
     GITHUB_TOKEN: render-only-github
     TF_TOKEN: render-only-terraform
-  acme-bob: *acme_secrets
-  tools-alice:
+  tools:
     API_KEY: render-only-key
 setups:
   - name: acme

@@ -117,7 +117,7 @@
   ansible.builtin.fail:
     msg: >-
       group_vars/all.yml: the secret variables
-      {{ nucarium_env_secrets | selectattr('secret', 'in', env_shared) | map(attribute='env') | zip(nucarium_env_secrets | selectattr('secret', 'in', env_shared) | map(attribute='name')) | map('join', ': ') | join(', ') }}
+      {{ nucarium_env_secrets | selectattr('secret', 'in', env_shared) | map(attribute='env') | map('extract', nucarium_env_labels) | zip(nucarium_env_secrets | selectattr('secret', 'in', env_shared) | map(attribute='name')) | map('join', ': ') | join(', ') }}
       would all be stored as {{ env_shared | join(', ') }}: rename one of them, or one of the environments.
   when: env_shared | length > 0
   vars:

@@ -22,10 +22,10 @@ the config folder `/home/agent/.claude-<setup>-<login>`. A box without
 |---|---|---|
 | `setups` | none | A list of setups. Each has a `name` (lower-case letters, digits and hyphens) and any of the keys an environment takes except `name`, `config_dir` and `capacity`: `runtime`, `network`, `allowed_hosts`, `variables`, `setup_script`, `repos`, `secret_variables`, `github`, `start_script`. Needs `logins`. |
 | `logins` | none | A list of logins. Each has a `name`, an optional `capacity`, and `setups`, the setups it joins (at least one, each once). Needs `setups`. Delete the `environments:` block when you add these: the playbook stops while `environments` is anything other than the shipped `main` entry. |
+| `setup_secrets` | none | The values of each setup's `secret_variables`, as `setup_secrets.<setup>.<NAME>`, in your file of environment secrets (`-e @environment-secrets.yml`), or as `secrets.setups.<setup>.<NAME>` in a whole `secrets` given with `-e`; `setup_secrets` wins where both name one. Every environment of the setup gets them. With setups, `environment_secrets` and `secrets.environments` are not read, and the playbook stops while they hold values. |
 
 Each pair is a whole environment: its own agent server, container, nucleus,
-Watch environment and sign-in. Secret values are given per pair for now, as
-`environment_secrets.<setup>-<login>.<NAME>`.
+Watch environment and sign-in.
 
 ### Settings changed
 

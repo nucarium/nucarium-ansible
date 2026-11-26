@@ -55,6 +55,10 @@ rm -rf out/render-pairs && cp -R out/render out/render-pairs
 ansible-playbook tests/render.yml -e @tests/logins-setups-by-hand.yml -e @tests/logins-setups-expected.yml
 diff -r out/render-pairs out/render
 echo "the same files"
+# The same, with the setups' secrets inside a whole secrets given with -e.
+ansible-playbook tests/render.yml -e @tests/logins-setups.yml -e @tests/logins-setups-expected.yml -e '{"setup_secrets": {},
+  "secrets": {"npm_token": "render-only", "setups": {"acme": {"GITHUB_TOKEN": "a", "TF_TOKEN": "b"}, "tools": {"API_KEY": "c"}}}}' > /dev/null
+echo "and with the secrets in secrets.setups"
 # A run of one part of the playbook makes the same environments.
 ansible-playbook site.yml --list-tasks --tags claude,env_setup | grep -q 'Make one environment for each setup a login joins'
 echo "a run with --tags makes them too"
@@ -178,7 +182,11 @@ refuse_setups 'login alice: it has keys a login does not take: runtime' "{\"setu
 refuse_setups 'setup acme: setup_script has {{, {% or {# in it' "{\"setups\": [{\"name\": \"acme\", \"setup_script\": \"n=\${#x}\"}], \"logins\": [$alice]}"
 refuse_setups 'its name is 49 characters long, and may be at most 48: shorten the setup' "{\"setups\": [{\"name\": \"a-setup-with-a-rather-long-name-indeed\"}], \"logins\": [{\"name\": \"alice-abcd\", \"setups\": [\"a-setup-with-a-rather-long-name-indeed\"]}]}"
 refuse_setups 'setup acme, login alice (environment acme-alice): secret_variables needs runtime: container, and runtime is host; github needs runtime: container' "{\"setups\": [{\"name\": \"acme\", \"github\": {\"name\": \"Acme Agent\", \"email\": \"agent@example.com\"}, \"secret_variables\": [\"GITHUB_TOKEN\"]}], \"logins\": [$alice]}"
-refuse_setups 'setup acme has github or secret_variables, which need every setup on the box in a container (runtime: container), and plain is on the host' "{\"setups\": [{\"name\": \"acme\", \"runtime\": \"container\", \"secret_variables\": [\"TF_TOKEN\"]}, {\"name\": \"plain\"}], \"logins\": [{\"name\": \"alice\", \"setups\": [\"acme\", \"plain\"]}], \"environment_secrets\": {\"acme-alice\": {\"TF_TOKEN\": \"x\"}}}"
+refuse_setups 'setup acme has github or secret_variables, which need every setup on the box in a container (runtime: container), and plain is on the host' "{\"setups\": [{\"name\": \"acme\", \"runtime\": \"container\", \"secret_variables\": [\"TF_TOKEN\"]}, {\"name\": \"plain\"}], \"logins\": [{\"name\": \"alice\", \"setups\": [\"acme\", \"plain\"]}], \"setup_secrets\": {\"acme\": {\"TF_TOKEN\": \"x\"}}}"
+# A setup's secret values are the setup's, given once.
+refuse_setups 'setup acme: secret_variables lists TF_TOKEN, and setup_secrets.acme.TF_TOKEN has no value' "{\"setups\": [{\"name\": \"acme\", \"runtime\": \"container\", \"secret_variables\": [\"TF_TOKEN\"]}], \"logins\": [$alice, {\"name\": \"bob\", \"setups\": [\"acme\"]}]}"
+refuse_setups 'environment_secrets holds values, which logins and setups do not read' "{\"setups\": [$acme], \"logins\": [$alice], \"environment_secrets\": {\"acme-alice\": {\"TF_TOKEN\": \"x\"}}}"
+refuse_setups 'secrets.environments holds values, which logins and setups do not read' "{\"setups\": [$acme], \"logins\": [$alice], \"secrets\": {\"environments\": {\"acme-alice\": {\"TF_TOKEN\": \"x\"}}}}"
 # The keys tasks/expand-setups.yml adds are never written by hand.
 refuse 'keys the recipe does not know: setup' '{"name": "main", "setup": "acme"}'
 refuse 'its name is 50 characters long, and may be at most 48' '{"name": "an-environment-whose-name-is-far-too-long-to-fit-x"}'
