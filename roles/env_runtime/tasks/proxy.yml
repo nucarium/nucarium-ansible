@@ -1,18 +1,18 @@
 ---
 # The network of each container environment: two networks and a proxy, as
-# quadlet files for the agent user's manager, and the proxy's rules
-# (vars/proxy.yml says what each is and where). The files are root's; the
-# image, the networks and the proxies are the agent user's. Starts the
-# proxies, and nothing else: no agent server.
+# quadlet files for the agent user's manager, and the proxy's rules and the
+# box's addresses (vars/proxy.yml says what each is and where). The files
+# are root's; the image, the networks and the proxies are the agent user's.
+# Starts the proxies, and nothing else: no agent server.
 #
 # Input: env_runtime_proxy_environments, the container environments, each
 # with name, network and allowed_hosts as in environments. A proxy whose
 # environment is not in it is stopped and removed, with its networks; with
 # an empty list, that is all this does.
 #
-# The rules apply to the next request when they change, with no restart. A
-# changed proxy image or unit restarts the proxy, which cuts its open
-# connections (Claude Code reconnects).
+# The rules and the box's addresses apply to the next request when they
+# change, with no restart. A changed proxy image or unit restarts the proxy,
+# which cuts its open connections (Claude Code reconnects).
 - name: Read the proxy's settings
   ansible.builtin.include_vars: proxy.yml
 
@@ -98,6 +98,39 @@
     label: "{{ env.name }}"
   # A new network builds the environment's image again (the env_setup role).
   register: env_runtime_proxy_rules_written
+
+# Read again here, not at the start of the run: the tailnet's address may be
+# newer than the run's facts.
+- name: Read the box's addresses
+  when: env_runtime_proxy_environments | length > 0
+  ansible.builtin.setup:
+    gather_subset: ["!all", "!min", network]
+  register: env_runtime_proxy_box_facts
+
+- name: Check the box has addresses for the proxies to refuse
+  when: env_runtime_proxy_environments | length > 0
+  ansible.builtin.assert:
+    that:
+      - env_runtime_proxy_box.addresses | length > 0
+    fail_msg: >-
+      No address of this box was found, so its environments' proxies could
+      not refuse it. Run the playbook again once the box's network is up.
+    quiet: true
+
+# Beside the rules, read again by the proxy when it changes, with no restart.
+# Never registered for env_setup: a new address builds no image.
+- name: Write the box's addresses for each environment's proxy
+  become: true
+  ansible.builtin.copy:
+    content: "{{ env_runtime_proxy_box | to_nice_json }}\n"
+    dest: "{{ env_runtime_proxy_rules_dir }}/box.json"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ env_runtime_proxy_environments }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
 
 - name: Write each environment's networks and proxy
   become: true

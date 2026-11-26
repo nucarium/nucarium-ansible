@@ -146,7 +146,8 @@ github_app_installation_id: "12345678"
 #                  them: even with none, it can still fetch a page once a
 #                  permission prompt is approved. In a container it governs
 #                  everything in it, through the environment's proxy;
-#                  Claude Code's own hosts are always reachable.
+#                  Claude Code's own hosts are always reachable, and the
+#                  box itself never is, by its address or by a name.
 #   allowed_hosts  More hosts for limited, one per line, on top of that
 #                  list. A leading *. matches every subdomain.
 #   variables      NAME: value lines, set in every new session of the
