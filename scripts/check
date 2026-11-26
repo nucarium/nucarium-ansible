@@ -58,6 +58,16 @@ ansible-playbook tests/render.yml -e @tests/logins-setups-by-hand.yml -e @tests/
 # written by hand each have their own.
 diff -r -x next-steps.txt out/render-pairs out/render
 echo "the same files"
+# With the environments: block deleted, as the settings file says to: a
+# copy of the settings without it, beside an inventory of its own (-e cannot
+# remove a variable, and would outrank the environments made from setups).
+noenv=out/render-noenv
+rm -rf "$noenv" && mkdir -p "$noenv/group_vars"
+cp inventory.ini "$noenv/"
+awk '/^environments:$/ {skip = 1; next} skip && /^  / {next} {skip = 0; print}' group_vars/all.yml > "$noenv/group_vars/all.yml"
+if grep -q '^environments:' "$noenv/group_vars/all.yml"; then echo "environments is still in $noenv"; exit 1; fi
+ansible-playbook -i "$noenv/inventory.ini" tests/render.yml -e @tests/logins-setups.yml -e @tests/logins-setups-expected.yml > /dev/null
+echo "and with no environments block"
 # The same, with the setups' secrets inside a whole secrets given with -e.
 ansible-playbook tests/render.yml -e @tests/logins-setups.yml -e @tests/logins-setups-expected.yml -e '{"setup_secrets": {},
   "secrets": {"npm_token": "render-only", "setups": {"acme": {"GITHUB_TOKEN": "a", "TF_TOKEN": "b"}, "tools": {"API_KEY": "c"}}}}' > /dev/null
