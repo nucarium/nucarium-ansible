@@ -49,6 +49,26 @@ ansible-playbook tests/render.yml -e @tests/own-identities.yml -e '{"environment
   "secrets": {"npm_token": "render-only", "environments": {"acme": {"GITHUB_TOKEN": "a", "TF_TOKEN": "b", "NODE_AUTH_TOKEN": "c"},
   "tools": {"API_KEY": "d"}, "docs": {"NODE_AUTH_TOKEN": "e"}}}}'
 
+echo "== logins and setups render the same files as their environments written by hand"
+ansible-playbook tests/render.yml -e @tests/logins-setups.yml -e @tests/logins-setups-expected.yml
+rm -rf out/render-pairs && cp -R out/render out/render-pairs
+ansible-playbook tests/render.yml -e @tests/logins-setups-by-hand.yml -e @tests/logins-setups-expected.yml
+diff -r out/render-pairs out/render
+echo "the same files"
+# With the environments: block deleted, as the settings file says to: a
+# copy of the settings without it, beside an inventory of its own (-e cannot
+# remove a variable, and would outrank the environments made from setups).
+noenv=out/render-noenv
+rm -rf "$noenv" && mkdir -p "$noenv/group_vars"
+cp inventory.ini "$noenv/"
+awk '/^environments:$/ {skip = 1; next} skip && /^  / {next} {skip = 0; print}' group_vars/all.yml > "$noenv/group_vars/all.yml"
+if grep -q '^environments:' "$noenv/group_vars/all.yml"; then echo "environments is still in $noenv"; exit 1; fi
+ansible-playbook -i "$noenv/inventory.ini" tests/render.yml -e @tests/logins-setups.yml -e @tests/logins-setups-expected.yml > /dev/null
+echo "and with no environments block"
+# A run of one part of the playbook makes the same environments.
+ansible-playbook site.yml --list-tasks --tags claude,env_setup | grep -q 'Make one environment for each setup a login joins'
+echo "a run with --tags makes them too"
+
 echo "== each architecture gets its own nucleate archive, checked against its own pin"
 for machine in x86_64 aarch64; do
   ansible-playbook tests/render.yml -e nucarium_machine=$machine > /dev/null
@@ -137,6 +157,42 @@ refuse 'environment acme: secret_variables lists TF_TOKEN, and environment_secre
 # shellcheck disable=SC2016  # the ${#x} is the script's, not this one's
 refuse 'environment acme: start_script has {{, {% or {# in it' "{\"name\": \"acme\", $box, \"start_script\": \"n=\${#x}\"}"
 
+# Logins and setups. Each argument after the message is a JSON object of
+# settings, given with -e; environments stays the shipped one unless it
+# names another.
+refuse_setups() {
+  if out=$(ansible-playbook tests/render.yml -e "$2" 2>&1); then
+    echo "Accepted, but must be refused: $2"
+    exit 1
+  fi
+  case "$out" in
+    *"$1"*) echo "refused: $2" ;;
+    *) printf '%s\n' "$out"; echo "Refused, but without saying: $1"; exit 1 ;;
+  esac
+}
+alice='{"name": "alice", "setups": ["acme"]}'
+acme='{"name": "acme", "runtime": "container"}'
+refuse_setups 'logins needs setups beside it' "{\"logins\": [$alice]}"
+refuse_setups 'setups needs logins beside it' "{\"setups\": [$acme]}"
+refuse_setups 'environments is set beside logins and setups, which take its place: delete the environments: block' "{\"setups\": [$acme], \"logins\": [$alice], \"environments\": [{\"name\": \"main\"}]}"
+refuse_setups 'login alice: setups lists tools, which is not a setup' "{\"setups\": [$acme], \"logins\": [{\"name\": \"alice\", \"setups\": [\"acme\", \"tools\"]}]}"
+refuse_setups 'login alice: setups lists acme more than once' "{\"setups\": [$acme], \"logins\": [{\"name\": \"alice\", \"setups\": [\"acme\", \"acme\"]}]}"
+refuse_setups 'login alice: setups is a list of the setups it joins, one per line, with at least one' "{\"setups\": [$acme], \"logins\": [{\"name\": \"alice\", \"setups\": []}]}"
+refuse_setups 'setup Acme: name is a short label of lower-case letters, digits and hyphens' "{\"setups\": [{\"name\": \"Acme\"}], \"logins\": [{\"name\": \"alice\", \"setups\": [\"Acme\"]}]}"
+refuse_setups 'more than one setup is named acme' "{\"setups\": [$acme, $acme], \"logins\": [$alice]}"
+refuse_setups 'more than one login is named alice' "{\"setups\": [$acme], \"logins\": [$alice, $alice]}"
+refuse_setups 'setup a-b with login c and setup a with login b-c would both be environment a-b-c: rename a setup or a login' '{"setups": [{"name": "a-b"}, {"name": "a"}], "logins": [{"name": "c", "setups": ["a-b"]}, {"name": "b-c", "setups": ["a"]}]}'
+refuse_setups 'setup acme: it has keys a setup does not take: capacity, config_dir' "{\"setups\": [{\"name\": \"acme\", \"capacity\": 4, \"config_dir\": \"/home/agent/.claude-x\"}], \"logins\": [$alice]}"
+refuse_setups 'login alice: it has keys a login does not take: runtime' "{\"setups\": [$acme], \"logins\": [{\"name\": \"alice\", \"runtime\": \"container\", \"setups\": [\"acme\"]}]}"
+# shellcheck disable=SC2016  # the ${#x} is the script's, not this one's
+refuse_setups 'setup acme: setup_script has {{, {% or {# in it' "{\"setups\": [{\"name\": \"acme\", \"setup_script\": \"n=\${#x}\"}], \"logins\": [$alice]}"
+refuse_setups 'its name is 49 characters long, and may be at most 48: shorten the setup' "{\"setups\": [{\"name\": \"a-setup-with-a-rather-long-name-indeed\"}], \"logins\": [{\"name\": \"alice-abcd\", \"setups\": [\"a-setup-with-a-rather-long-name-indeed\"]}]}"
+refuse_setups 'setup acme, login alice (environment acme-alice): secret_variables needs runtime: container, and runtime is host; github needs runtime: container' "{\"setups\": [{\"name\": \"acme\", \"github\": {\"name\": \"Acme Agent\", \"email\": \"agent@example.com\"}, \"secret_variables\": [\"GITHUB_TOKEN\"]}], \"logins\": [$alice]}"
+refuse_setups 'setup acme has github or secret_variables, which need every setup on the box in a container (runtime: container), and plain is on the host' "{\"setups\": [{\"name\": \"acme\", \"runtime\": \"container\", \"secret_variables\": [\"TF_TOKEN\"]}, {\"name\": \"plain\"}], \"logins\": [{\"name\": \"alice\", \"setups\": [\"acme\", \"plain\"]}], \"environment_secrets\": {\"acme-alice\": {\"TF_TOKEN\": \"x\"}}}"
+# The keys tasks/expand-setups.yml adds are never written by hand.
+refuse 'keys the recipe does not know: setup' '{"name": "main", "setup": "acme"}'
+refuse 'its name is 50 characters long, and may be at most 48' '{"name": "an-environment-whose-name-is-far-too-long-to-fit-x"}'
+
 # A login a container environment has used is never used on the host again.
 logins=out/render-logins
 rm -rf "$logins" && mkdir -p "$logins"
@@ -172,5 +228,18 @@ refuse_recorded() {
 refuse_recorded "environment acme: its name was a container environment's with a GitHub identity of its own" '{"name": "acme", "config_dir": "/home/agent/.claude-acme"}'
 refuse_recorded "environment other: its config_dir /home/agent/.claude-acme was a container environment's" '{"name": "other", "runtime": "container", "config_dir": "/home/agent/.claude-acme"}'
 refuse_recorded "runs on the host, and this box has had container environments with a GitHub identity of their own (acme)" '{"name": "main"}'
+# The same for the environment of a login and a setup, whose name and
+# config_dir are worked out: the way out is renaming one of them.
+echo '{"name": "acme-alice", "nucleus": "/home/agent/workspace-acme-alice", "config_dir": "/home/agent/.claude-acme-alice"}' > "$github_envs/acme-alice"
+if out=$(ansible-playbook tests/render.yml -e '{"setups": [{"name": "acme", "runtime": "container"}], "logins": [{"name": "alice", "setups": ["acme"]}]}' \
+  -e "nucarium_github_envs_dir=$PWD/$github_envs" 2>&1); then
+  echo "Accepted, but must be refused: a pair taking a recorded name"
+  exit 1
+fi
+case "$out" in
+  *"setup acme, login alice (environment acme-alice): its name was a container environment's with a GitHub identity of its own"*"give setup acme its github back, or rename the setup or the login"*)
+    echo "refused: a pair, after a GitHub identity of its own" ;;
+  *) printf '%s\n' "$out"; echo "Refused, but without naming the setup and login"; exit 1 ;;
+esac
 
 echo "== all checks passed"

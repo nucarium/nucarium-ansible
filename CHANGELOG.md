@@ -4,6 +4,48 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## Logins and setups
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+A box with several Claude logins and several kinds of work can list them
+apart, as `logins` and `setups`, in place of `environments`. Each login
+names the setups it joins, and the playbook makes one environment for each,
+named `<setup>-<login>`, with the setup's keys, the login's capacity and
+the config folder `/home/agent/.claude-<setup>-<login>`. A box without
+`setups` works exactly as before.
+
+### Settings added
+
+| Setting | Default | What it is |
+|---|---|---|
+| `setups` | none | A list of setups. Each has a `name` (lower-case letters, digits and hyphens) and any of the keys an environment takes except `name`, `config_dir` and `capacity`: `runtime`, `network`, `allowed_hosts`, `variables`, `setup_script`, `repos`, `secret_variables`, `github`, `start_script`. Needs `logins`. |
+| `logins` | none | A list of logins. Each has a `name`, an optional `capacity`, and `setups`, the setups it joins (at least one, each once). Needs `setups`. Delete the `environments:` block when you add these: the playbook stops while `environments` is anything other than the shipped `main` entry. |
+
+Each pair is a whole environment: its own agent server, container, nucleus,
+Watch environment and sign-in. Secret values are given per pair for now, as
+`environment_secrets.<setup>-<login>.<NAME>`.
+
+### Settings changed
+
+| Setting | What changed |
+|---|---|
+| `environments` | An environment's `name` may be at most 48 characters: its proxy's host name, `nucarium-proxy-<name>`, must fit in one 63-character DNS label. The playbook stops on a longer one. |
+
+### Roles and tags
+
+No role changes. The playbook makes the environments of logins and setups
+before anything else, on every run, `--tags` runs included.
+
+### A box built with an earlier copy of the recipe
+
+Nothing to do. To move a box to logins and setups, replace its
+`environments:` block with `setups:` and `logins:` and run the whole
+playbook. The environments that leave the list are removed as they always
+are, when their servers are idle; each new pair needs one sign-in by hand,
+listed in the closing message.
+
 ## Watch's actions on leftover session folders
 
 This entry has no version number of its own: the release that carries it is

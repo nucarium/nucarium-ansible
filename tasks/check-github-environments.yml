@@ -30,11 +30,11 @@
   ansible.builtin.fail:
     msg: >-
       group_vars/all.yml:
-      {% for e in github_envs_reused %}environment {{ e.name }}: its
+      {% for e in github_envs_reused %}{{ nucarium_env_labels[e.name] }}: its
       {{ 'name' if e.name in nucarium_github_envs_recorded | map(attribute='name') else 'config_dir ' ~ e.config_dir }}
       was a container environment's with a GitHub identity of its own (github), whose login, code and
-      token may be another owner's: give it its github back, or a new name and config_dir (a new login,
-      signed in again); {% endfor %}nothing on the box has been changed.
+      token may be another owner's: {{ ('give setup ' ~ e.setup ~ ' its github back, or rename the setup or the login (a new login, signed in again)') if e.setup is defined
+      else 'give it its github back, or a new name and config_dir (a new login, signed in again)' }}; {% endfor %}nothing on the box has been changed.
   when: github_envs_reused | length > 0
   vars:
     github_envs_reused: >-
@@ -49,7 +49,7 @@
 - name: Stop if an environment runs on the host on a box that has had one
   ansible.builtin.fail:
     msg: >-
-      group_vars/all.yml: environment{{ 's' if github_envs_host | length > 1 else '' }}
+      group_vars/all.yml: {{ 'setup' if setups is defined else 'environment' }}{{ 's' if github_envs_host | length > 1 else '' }}
       {{ github_envs_host | join(', ') }} {{ 'run' if github_envs_host | length > 1 else 'runs' }} on the host, and this box has had
       container environments with a GitHub identity of their own
       ({{ nucarium_github_envs_recorded | map(attribute='name') | unique | join(', ') }}), whose logins and code are still on it.
@@ -58,4 +58,5 @@
       and their records in {{ nucarium_github_envs_dir }} by hand. Nothing on the box has been changed.
   when: nucarium_github_envs_recorded | length > 0 and github_envs_host | length > 0
   vars:
-    github_envs_host: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='name') | list }}"
+    # With logins and setups, the setups whose pairs run on the host.
+    github_envs_host: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | map(attribute='setup' if setups is defined else 'name') | unique | list }}"

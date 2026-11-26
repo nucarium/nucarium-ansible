@@ -1,0 +1,48 @@
+---
+# A fifth shape to render: logins and setups in place of environments. alice
+# joins both setups and bob only acme, which makes three environments:
+# acme-alice, tools-alice and acme-bob. acme belongs to another owner, as
+# in own-identities.yml; tools has its own repositories and a secret
+# variable. scripts/check renders this with
+# logins-setups-expected.yml, and again as the same environments written by
+# hand (logins-setups-by-hand.yml), and the two must render the same files.
+nucleate_version: "0.7.0"
+secrets:
+  npm_token: render-only
+environment_secrets:
+  acme-alice: &acme_secrets
+    GITHUB_TOKEN: render-only-github
+    TF_TOKEN: render-only-terraform
+  acme-bob: *acme_secrets
+  tools-alice:
+    API_KEY: render-only-key
+setups:
+  - name: acme
+    runtime: container
+    repos:
+      - acme/web
+      - acme/api
+    variables:
+      NODE_ENV: development
+    secret_variables:
+      - GITHUB_TOKEN
+      - TF_TOKEN
+    github:
+      name: Acme Agent
+      email: agent@example.com
+    start_script: !unsafe |
+      service postgresql start
+      services=(postgresql)
+      echo "${#services[@]} started"
+  - name: tools
+    runtime: container
+    repos:
+      - other-org/tools
+    secret_variables:
+      - API_KEY
+logins:
+  - name: alice
+    capacity: 4
+    setups: [acme, tools]
+  - name: bob
+    setups: [acme]

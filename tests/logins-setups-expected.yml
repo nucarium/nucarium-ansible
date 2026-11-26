@@ -1,0 +1,48 @@
+---
+# What tests/logins-setups.yml and tests/logins-setups-by-hand.yml must both
+# render, environment by environment.
+render_expected_container_envs: [acme-alice, tools-alice, acme-bob]
+
+render_expected_secrets:
+  acme-alice:
+    - Secret=nucarium-env-acme-alice-github-token,type=env,target=GITHUB_TOKEN
+    - Secret=nucarium-env-acme-alice-tf-token,type=env,target=TF_TOKEN
+  tools-alice:
+    - Secret=nucarium-npm-token,type=env,target=NODE_AUTH_TOKEN
+    - Secret=nucarium-env-tools-alice-api-key,type=env,target=API_KEY
+  acme-bob:
+    - Secret=nucarium-env-acme-bob-github-token,type=env,target=GITHUB_TOKEN
+    - Secret=nucarium-env-acme-bob-tf-token,type=env,target=TF_TOKEN
+
+render_expected_repos:
+  acme-alice: &acme_repos
+    - https://github.com/acme/web.git
+    - https://github.com/acme/api.git
+  tools-alice:
+    - https://github.com/other-org/tools.git
+  acme-bob: *acme_repos
+
+render_expected_identities:
+  acme-alice: &acme_identity [Acme Agent, agent@example.com]
+  acme-bob: *acme_identity
+
+render_expected_start_scripts:
+  acme-alice: &acme_start !unsafe "service postgresql start\nservices=(postgresql)\necho \"${#services[@]} started\"\n"
+  acme-bob: *acme_start
+
+render_expected_summaries:
+  acme-alice: &acme_summary
+    network: limited
+    allowed_hosts: 0
+    repos: [acme/web, acme/api]
+    variables: 1
+    secrets: 0
+    setup_script: false
+  tools-alice:
+    network: limited
+    allowed_hosts: 0
+    repos: [other-org/tools]
+    variables: 0
+    secrets: 0
+    setup_script: false
+  acme-bob: *acme_summary
