@@ -6,7 +6,8 @@
 # variable. scripts/check renders this with
 # logins-setups-expected.yml, and again as the same environments written by
 # hand (logins-setups-by-hand.yml), and the two must render the same files.
-nucleate_version: "0.7.0"
+# The oldest nucleate a container environment takes.
+nucleate_version: "{{ nucleate_minimum_for_own_spools }}"
 secrets:
   npm_token: render-only
 # Each setup's secret values, given once for all its logins.

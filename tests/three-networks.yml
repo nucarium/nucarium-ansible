@@ -2,10 +2,11 @@
 # A third shape to render: one environment for each network, one in a
 # container and one on the host by name, an environment's own hosts,
 # variables whose values a careless quoting would break, and a setup script.
-# A container environment needs a nucleate that checks git config.
+# A container environment needs a nucleate that checks git config and reads
+# its own spool folder: the oldest one it takes.
 # The script and one value hold text Ansible would read as a template, so
 # they are marked !unsafe, as the comment in group_vars/all.yml says.
-nucleate_version: "0.7.0"
+nucleate_version: "{{ nucleate_minimum_for_own_spools }}"
 # An npm token, so that the container unit is rendered with its secret.
 secrets:
   npm_token: render-only

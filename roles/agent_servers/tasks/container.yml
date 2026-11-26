@@ -94,6 +94,21 @@
         mode: "0700"
       when: agent_servers_in_containers | length > 0
 
+    # Each container's own, mounted where the shared one would be, so that
+    # no container reads or writes another's waiting events. The daemon
+    # reads every one of them, and the shared one, which a container started
+    # before its own existed writes until it next starts.
+    - name: Create each container's own spool
+      become: true
+      become_user: "{{ agent_user }}"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: >-
+        {{ ([nucarium_nucleated_spools_dir] if agent_servers_in_containers | length > 0 else [])
+        + agent_servers_in_containers | map(attribute='name') | map('regex_replace', '^', nucarium_nucleated_spools_dir ~ '/') | list }}
+
     - name: Write each environment's agent server unit
       become: true
       ansible.builtin.template:

@@ -1,7 +1,8 @@
 ---
 # The environments tests/logins-setups.yml makes from its logins and setups,
 # written by hand. scripts/check renders both and requires the same files.
-nucleate_version: "0.7.0"
+# The oldest nucleate a container environment takes.
+nucleate_version: "{{ nucleate_minimum_for_own_spools }}"
 secrets:
   npm_token: render-only
 environment_secrets:
