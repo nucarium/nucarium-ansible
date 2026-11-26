@@ -8,8 +8,9 @@
 # (--tags) sees the same environments and removes none of them, and by
 # tests/render.yml.
 #
-# The shipped settings always hold environments (main), so "environments
-# given beside setups" means an environments that is not that one entry.
+# The shipped settings hold environments (main), so "environments given
+# beside setups" means an environments that is not that one entry. Deleted,
+# as the settings file says to, it is not there at all.
 - name: Check the logins and setups
   ansible.builtin.fail:
     msg: >-
@@ -30,7 +31,7 @@
       {% set ns = namespace(out=[], pairs=[]) %}
       {%- if setups is not defined %}{% set ns.out = ns.out + ['logins needs setups beside it: each login lists the setups it joins'] %}{% endif %}
       {%- if logins is not defined %}{% set ns.out = ns.out + ['setups needs logins beside it: each login lists the setups it joins'] %}{% endif %}
-      {%- if environments | default([]) != setups_shipped_environments %}{% set ns.out = ns.out + ['environments is set beside logins and setups, which take its place: delete the environments: block'] %}{% endif %}
+      {%- if environments | default(none) is not none and environments != setups_shipped_environments %}{% set ns.out = ns.out + ['environments is set beside logins and setups, which take its place: delete the environments: block'] %}{% endif %}
       {%- if environment_secrets | default({}, true) is mapping and environment_secrets | default({}, true) | length > 0 %}{% set ns.out = ns.out + ['environment_secrets holds values, which logins and setups do not read: give each setup' ~ "'" ~ 's as setup_secrets.<setup>.<NAME>'] %}{% endif %}
       {%- if (secrets | default({})).environments | default({}, true) is mapping and (secrets | default({})).environments | default({}, true) | length > 0 %}{% set ns.out = ns.out + ['secrets.environments holds values, which logins and setups do not read: give each setup' ~ "'" ~ 's as secrets.setups.<setup>.<NAME>'] %}{% endif %}
       {%- if setups is defined and setups_list | length == 0 %}{% set ns.out = ns.out + ['setups is a list of setups, each with a name:'] %}{% endif %}
