@@ -136,7 +136,7 @@ refuse_nucleated "to such a release, then run the whole playbook, or the workspa
 # After the workspace role installed nucleate_version, or a build of your own.
 refuse_nucleated "The nucleated at /usr/bin/false, from nucleate 0.7.0, does not read" -e render_box_nucleated=/usr/bin/false -e '{"workspace_release": {"changed": false}}'
 refuse_nucleated "to such a release, and run the playbook again." -e render_box_nucleated=/usr/bin/false -e '{"workspace_release": {"changed": false}}'
-refuse_nucleated "from nucleate_local_archive (/tmp/nucleate.tar.gz), does not read each container's own spool folder. Container environments need one from the first nucleate release after 0.13.0 that does (it has a look command), or a later one: build nucleate_local_archive from such a release, or clear it" \
+refuse_nucleated "from nucleate_local_archive (/tmp/nucleate.tar.gz), does not read each container's own spool folder. Container environments need one from nucleate 0.14.0 or later: build nucleate_local_archive from such a release, or clear it" \
   -e render_box_nucleated=/usr/bin/false -e nucleate_local_archive=/tmp/nucleate.tar.gz -e '{"workspace_local": {"changed": true}}'
 # A dry run that installs nothing first checks too.
 refuse_nucleated "does not read each container's own spool folder." -e render_box_nucleated=/usr/bin/false --check

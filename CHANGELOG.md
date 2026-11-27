@@ -23,7 +23,7 @@ No key is added, renamed or removed.
 
 | Setting | What changed |
 |---|---|
-| `nucleate_version` | A container environment needs the first `nucleate` release after 0.13.0 whose `nucleated` reads each container's own spool folder, or a later one. The playbook asks the box's `nucleated`, and stops on an older one before it changes any container's unit. |
+| `nucleate_version` | A container environment needs `nucleate` 0.14.0 or later, the first whose `nucleated` reads each container's own spool folder. The playbook asks the box's `nucleated`, and stops on an older one before it changes any container's unit. |
 
 ### Roles and tags
 

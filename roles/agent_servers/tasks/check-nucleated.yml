@@ -37,8 +37,7 @@
     fail_msg: >-
       The nucleated at {{ agent_servers_nucleated }}{{ agent_servers_installed }}
       {{ 'does not read each container' ~ "'" ~ 's own spool folder' if agent_servers_nucleated_file.stat.exists | default(false) else 'is not there' }}.
-      Container environments need one from the first nucleate release after
-      0.13.0 that does (it has a look command), or a later one:
+      Container environments need one from nucleate 0.14.0 or later:
       {{ agent_servers_remedy }},
       {{ 'and run the playbook again' if agent_servers_workspace_ran else 'then run the whole playbook, or the workspace role, which installs it' }}.
       No container's unit was changed.
