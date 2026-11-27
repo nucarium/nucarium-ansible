@@ -29,9 +29,20 @@
         network: none
       - name: open
         network: full
+    # Stand-in for the network facts the role reads from the box: a LAN
+    # address, the tailnet's two, a podman bridge, link-local IPv6 with its
+    # interface, the same LAN address twice, and the default gateways.
+    env_runtime_proxy_box_facts:
+      ansible_facts:
+        ansible_all_ipv4_addresses: [192.168.1.20, 100.101.102.103, 10.88.0.1, 192.168.1.20]
+        ansible_all_ipv6_addresses: ["fd7a:115c:a1e0::1234", "fe80::5054:ff:fe12:3456%enp1s0"]
+        ansible_default_ipv4: {address: 192.168.1.20, gateway: 192.168.1.1, interface: enp1s0}
+        ansible_default_ipv6: {}
+    render_box_addresses: [10.88.0.1, 100.101.102.103, 192.168.1.1, 192.168.1.20, "fd7a:115c:a1e0::1234", "fe80::5054:ff:fe12:3456"]
     # Read from what was rendered, in the checks below.
     render_lines: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ render_file).split('\n') | map('trim') | list }}"
     render_rules: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.rules.json') | from_json }}"
+    render_box: "{{ lookup('ansible.builtin.file', render_dir ~ '/' ~ env.name ~ '.box.json') | from_json }}"
   tasks:
     # In the role, role_path says where its files are.
     - name: Find the proxy image's files as the role does
@@ -68,6 +79,16 @@
         loop_var: env
         label: "{{ env.name }}"
 
+    - name: Write the box's addresses for each environment's proxy
+      ansible.builtin.copy:
+        content: "{{ env_runtime_proxy_box | to_nice_json }}\n"
+        dest: "{{ render_dir }}/{{ env.name }}.box.json"
+        mode: "0600"
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
     # limited reaches what a host-mode sandbox would: the cloud list, the
     # box's extra hosts and the environment's own. none and full list
     # nothing (full allows every host by its mode). Claude Code's own hosts
@@ -86,6 +107,28 @@
           - env.network != 'limited' or render_rules.allow | length == render_rules.allow | unique | length
           - "'*' not in render_rules.allow"
         quiet: true
+      loop: "{{ env_runtime_proxy_environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    # The box's addresses, every one the facts name, once each, for every
+    # mode: in their own file, never in the rules, whose changes build the
+    # environment's image again. The proxy reads both from the folder it
+    # mounts, under the names it looks for.
+    - name: Check each environment's box addresses
+      ansible.builtin.assert:
+        that:
+          - render_box.keys() | list == ['addresses']
+          - render_box.addresses == render_box_addresses
+          - render_rules.allow | intersect(render_box_addresses) == []
+          - render_rules.always | intersect(render_box_addresses) == []
+          - "'box.json' not in env_runtime_proxy_files"
+          - render_addon is search('"NUCARIUM_PROXY_BOX", "/etc/nucarium-proxy/box.json"')
+          - render_addon is search('"NUCARIUM_PROXY_RULES", "/etc/nucarium-proxy/rules.json"')
+        quiet: true
+      vars:
+        render_addon: "{{ lookup('ansible.builtin.file', env_runtime_proxy_src ~ '/nucarium_proxy.py') }}"
       loop: "{{ env_runtime_proxy_environments }}"
       loop_control:
         loop_var: env

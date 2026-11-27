@@ -4,6 +4,34 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## A spool per container, and a proxy that never reaches the box
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+Two changes to every box with a container environment. Each container
+writes a spool folder of its own, so no container can read or write
+another's waiting events. And no environment's proxy connects to the box
+itself, in any network mode, `full` included: not to an address on the
+box's interfaces (its tailnet and LAN addresses), its gateways, loopback,
+link-local addresses or Tailscale's resolver, and not to a name that
+resolves to one. A box with no container environment is unchanged.
+
+### Settings changed
+
+No key is added, renamed or removed.
+
+| Setting | What changed |
+|---|---|
+| `nucleate_version` | A container environment needs `nucleate` 0.14.0 or later, the first whose `nucleated` reads each container's own spool folder. The playbook asks the box's `nucleated`, and stops on an older one before it changes any container's unit. |
+
+### Roles and tags
+
+| Role | What changed |
+|---|---|
+| `agent_servers` | Makes `~/.local/state/nucleated/spools/<name>/` (the agent user's, mode 700) for each container environment and mounts it in its container where the shared spool was. A container keeps the shared one until it next starts, and `nucleated` reads both. Stops first when the box's `nucleated` does not read them. |
+| `env_runtime` | Writes the box's addresses, from its network facts read during the run, to `box.json` beside each proxy's rules in `/etc/nucarium/proxy/<name>/`, root's. The proxy reads it again when it changes. It looks a name up once, as it connects, refuses it when any of its addresses is the box's, and otherwise connects to the address it found. It refuses everything while `box.json` cannot be read. The proxy image is built again. A new LAN address takes effect at the next run of the role; it builds no environment image. |
+
 ## Logins and setups
 
 This entry has no version number of its own: the release that carries it is

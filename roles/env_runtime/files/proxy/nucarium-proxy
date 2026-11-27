@@ -5,9 +5,9 @@ It listens on the environment's internal network only, at the address of
 the interface named NUCARIUM_PROXY_INTERFACE, on NUCARIUM_PROXY_PORT. The
 egress network's interface has nothing listening.
 
-It refuses to start when the addon does not load or the rules file is not
-valid: mitmproxy would otherwise run without the addon, and allow every
-host.
+It refuses to start when the addon does not load, or the rules file, the
+box file or the routing table cannot be read: mitmproxy would otherwise run
+without the addon, and allow every host.
 """
 import fcntl
 import os
@@ -31,6 +31,9 @@ def main():
 
     try:
         rules = nucarium_proxy.load_rules(nucarium_proxy.RULES_FILE)
+        with open(nucarium_proxy.BOX_FILE, encoding="utf-8") as f:
+            nucarium_proxy.parse_box(f.read())
+        nucarium_proxy.gateways()
         address = ipv4_address(os.environ["NUCARIUM_PROXY_INTERFACE"])
     except (OSError, ValueError, KeyError) as e:
         print(f"nucarium-proxy: cannot start: {e!r}", file=sys.stderr)

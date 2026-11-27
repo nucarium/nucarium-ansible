@@ -114,6 +114,46 @@ refuse() {
 refuse 'runtime is "docker", and must be host or container' '{"name": "main", "runtime": "docker"}'
 refuse 'network is "open", and must be none, limited or full' '{"name": "main", "network": "open"}'
 refuse 'runtime is container, which needs nucleate 0.7.0 or later, and nucleate_version is 0.6.0' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/.claude-second"}' 0.6.0
+# A box whose nucleated does not read each container's own spool folder,
+# or has none: no container environment is set up there, and the message
+# says what to do. Each argument after the message is given with -e.
+refuse_nucleated() {
+  want=$1
+  shift
+  if out=$(ansible-playbook tests/render.yml -e @tests/three-networks.yml "$@" 2>&1); then
+    echo "Accepted, but must be refused: $*"
+    exit 1
+  fi
+  case "$out" in
+    *"$want"*"No container's unit was changed."*) echo "refused: $*" ;;
+    *) printf '%s\n' "$out"; echo "Refused, but without saying: $want"; exit 1 ;;
+  esac
+}
+refuse_nucleated "The nucleated at /usr/bin/false does not read each container's own spool folder." -e render_box_nucleated=/usr/bin/false
+refuse_nucleated "The nucleated at $PWD/out/no-such-nucleated is not there." -e "render_box_nucleated=$PWD/out/no-such-nucleated"
+# A run of one part, which installs nothing first.
+refuse_nucleated "to such a release, then run the whole playbook, or the workspace role, which installs it." -e render_box_nucleated=/usr/bin/false
+# After the workspace role installed nucleate_version, or a build of your own.
+refuse_nucleated "The nucleated at /usr/bin/false, from nucleate 0.7.0, does not read" -e render_box_nucleated=/usr/bin/false -e '{"workspace_release": {"changed": false}}'
+refuse_nucleated "to such a release, and run the playbook again." -e render_box_nucleated=/usr/bin/false -e '{"workspace_release": {"changed": false}}'
+refuse_nucleated "from nucleate_local_archive (/tmp/nucleate.tar.gz), does not read each container's own spool folder. Container environments need one from nucleate 0.14.0 or later: build nucleate_local_archive from such a release, or clear it" \
+  -e render_box_nucleated=/usr/bin/false -e nucleate_local_archive=/tmp/nucleate.tar.gz -e '{"workspace_local": {"changed": true}}'
+# A dry run that installs nothing first checks too.
+refuse_nucleated "does not read each container's own spool folder." -e render_box_nucleated=/usr/bin/false --check
+ansible-playbook tests/render.yml -e render_box_nucleated=/usr/bin/false > /dev/null
+echo "and with no container environment, nucleated is not asked"
+# The role asks before it changes anything of a container.
+tasks=$(ansible-playbook site.yml --list-tasks --tags agent_servers)
+at() { printf '%s\n' "$tasks" | grep -n -F "agent_servers : $1" | head -n 1 | cut -d: -f1; }
+stop=$(at "Stop if nucleated does not read each container's own spool")
+if [ -z "$stop" ]; then echo "The agent_servers role does not ask nucleated"; exit 1; fi
+for task in "Create root's folders for the quadlet files and the servers' folders" "Create each server's folder" \
+  "Register the worktree hooks in each server's folder" "Create nucleated's spool" "Create each container's own spool" \
+  "Write each environment's agent server unit"; do
+  n=$(at "$task")
+  if [ -z "$n" ] || [ "$n" -le "$stop" ]; then echo "The agent_servers role does not ask nucleated before: $task"; exit 1; fi
+done
+echo "and the agent_servers role asks it before it changes any container"
 refuse 'runtime is container, whose config_dir must be a folder of its own named .claude-<something>' '{"name": "second", "runtime": "container", "config_dir": "/home/agent/logins/second"}'
 refuse 'runtime is container, and its config_dir /home/agent/.claude-two is also another environment' '{"name": "one", "runtime": "container", "config_dir": "/home/agent/.claude-two"}, {"name": "two", "config_dir": "/home/agent/.claude-two"}'
 refuse 'runtime is container, which needs a config_dir of its own, such as /home/agent/.claude-main: the first login (~/.claude) stays on the host' '{"name": "main", "runtime": "container"}'

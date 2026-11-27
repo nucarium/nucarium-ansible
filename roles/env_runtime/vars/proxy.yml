@@ -78,6 +78,23 @@ env_runtime_proxy_rules:
   allow: "{{ claude_sandbox_network.allowedDomains if env_network == 'limited' else [] }}"
   always: "{{ env_runtime_proxy_claude_hosts }}"
 
+# The box's own addresses, which no proxy connects to in any mode: every
+# address on the box's interfaces (its tailnet's and its LAN's among them)
+# and its default gateways, from the network facts read just before they are
+# written (env_runtime_proxy_box_facts, tasks/proxy.yml). The proxy adds
+# loopback, link-local, Tailscale's resolver and the gateways of its own
+# routing table. A file of their own, box.json beside rules.json, never in
+# the rules: a change of the rules builds the environment's image again, and
+# a new LAN address must not.
+env_runtime_proxy_box_found: "{{ env_runtime_proxy_box_facts.ansible_facts | default({}) }}"
+env_runtime_proxy_box:
+  addresses: >-
+    {{ (env_runtime_proxy_box_found.ansible_all_ipv4_addresses | default([])
+    + env_runtime_proxy_box_found.ansible_all_ipv6_addresses | default([])
+    + [(env_runtime_proxy_box_found.ansible_default_ipv4 | default({})).gateway | default(''),
+       (env_runtime_proxy_box_found.ansible_default_ipv6 | default({})).gateway | default('')])
+    | select | map('regex_replace', '%.*$', '') | unique | sort | list }}
+
 # What a container of the environment sets to reach the network through its
 # proxy. Node reads the variables only with NODE_USE_ENV_PROXY.
 env_runtime_proxy_url: http://{{ env_runtime_proxy_name }}:{{ env_runtime_proxy_port }}

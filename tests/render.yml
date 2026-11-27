@@ -42,6 +42,9 @@
     env_unit: "{{ 'agent-env-' ~ env.name ~ '.service' if env_runtime == 'container' else 'agent-server@' ~ env.name ~ '.service' }}"
     env_nucleus: "{{ agent_home ~ '/workspace-' ~ env.name if env_runtime == 'container' else nucleus_root }}"
     watch_console_url: https://app.nucarium.com
+    # A stand-in for the box's nucleated, which reads each container's own
+    # spool: -e render_box_nucleated=/usr/bin/false is one that does not.
+    render_box_nucleated: /usr/bin/true
     render_per_server:
       - src: ../roles/agent_servers/templates/agent-server.env.j2
         dest: env
@@ -90,6 +93,15 @@
 
     - name: Check the environments that have had a GitHub identity of their own
       ansible.builtin.import_tasks: ../tasks/check-github-environments.yml
+
+    # What the agent_servers role asks the box's nucleated before it changes
+    # any container, as the user running this.
+    - name: Check nucleated reads each container's own spool
+      ansible.builtin.import_tasks: ../roles/agent_servers/tasks/check-nucleated.yml
+      vars:
+        agent_servers_in_containers: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | list }}"
+        agent_servers_nucleated: "{{ render_box_nucleated }}"
+        ansible_become: false
 
     - name: Start from an empty folder
       ansible.builtin.file:
@@ -479,7 +491,7 @@
         label: "{{ outer.0.name }}.{{ outer.1.dest }}"
 
     # Everything the plan's mounts say, and nothing more: the nucleus and the
-    # login's folder read-write, nucleated's spool read-write, the rest
+    # login's folder read-write, the environment's own spool read-write, the rest
     # read-only, all at their host paths; nothing over /root; folders, not
     # files. One network, the environment's own, and its proxy's variables.
     - name: Check each container unit
@@ -558,9 +570,10 @@
           {{ lookup('ansible.builtin.file', env_runtime_role_dir ~ '/files/base/Containerfile')
           | regex_search('(?m)^ENV PATH=(\S+)', '\1') | first | replace('${NODE_VERSION}', node_version) }}
         # Each mount: how it is mounted, its host path and its path in the
-        # container, in order. All at their host paths but the Git settings
-        # of an environment with a GitHub identity of its own, which are its
-        # own folder at the box's path; such an environment has no GitHub App
+        # container, in order. All at their host paths but the environment's
+        # own spool, at the shared spool's path, and the Git settings of an
+        # environment with a GitHub identity of its own, which are its own
+        # folder at the box's path; such an environment has no GitHub App
         # token.
         render_mounts: >-
           {{ [['rw', render_nucleus, render_nucleus],
@@ -575,7 +588,7 @@
               ['ro', agent_home ~ '/.local/share/claude', agent_home ~ '/.local/share/claude'],
               ['ro', agent_home ~ '/.local/bin', agent_home ~ '/.local/bin'],
               ['ro', agent_home ~ '/.config/nucleated-hook', agent_home ~ '/.config/nucleated-hook'],
-              ['rw', agent_home ~ '/.local/state/nucleated/spool', agent_home ~ '/.local/state/nucleated/spool']]
+              ['rw', agent_home ~ '/.local/state/nucleated/spools/' ~ env.name, agent_home ~ '/.local/state/nucleated/spool']]
           + ([] if env_github else [['ro', '/run/agent-tokens', '/run/agent-tokens']])
           + [['ro', '/etc/nucarium/environments/' ~ env.name, '/etc/nucarium/environments/' ~ env.name],
              ['ro', '/usr/local/lib/nucarium', '/usr/local/lib/nucarium'],

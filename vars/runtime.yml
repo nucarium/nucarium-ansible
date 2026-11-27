@@ -160,9 +160,13 @@ nucarium_env_secrets: >-
   {% set ns = namespace(out=[]) %}{% for e in environments if e.name in nucarium_container_envs %}{% for name in e.secret_variables | default([], true) %}{% set ns.out = ns.out + [{'env': e.name, 'name': name, 'secret': nucarium_env_secret_prefix ~ e.name ~ '-' ~ (name | lower | replace('_', '-'))}] %}{% endfor %}{% endfor %}{{ ns.out }}
 
 # nucleated's state folder, which holds the spool its hooks write session
-# events to: the daemon's own default, written out. A container environment
-# writes the spool, mounted at the same path, and nothing else of it.
+# events to: the daemon's own default, written out. Hooks on the host write
+# its spool folder. A container environment writes a spool folder of its
+# own, spools/<name>, mounted where the shared one would be (so its hook
+# finds it where it always has), and nothing else of the state folder: no
+# container reads or writes another's waiting events.
 nucarium_nucleated_state_dir: "{{ agent_home }}/.local/state/nucleated"
+nucarium_nucleated_spools_dir: "{{ nucarium_nucleated_state_dir }}/spools"
 
 # The configuration nucleated's hook reads inside a container environment
 # (NUCLEATED_CONFIG): the environments and the state folder, and no token.
