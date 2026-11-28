@@ -178,6 +178,9 @@
           # Worktree actions are written only when turned on.
           - ('worktree_actions' in render_config) == (watch_worktree_actions | bool)
           - not (watch_worktree_actions | bool) or render_config.worktree_actions == true
+          # Session names are written only when turned on.
+          - ('session_names' in render_config) == (watch_session_names | bool)
+          - not (watch_session_names | bool) or render_config.session_names == true
           - not (nut_enabled | bool) or render_config.ups.name == ups_name ~ '@localhost'
           - ('notify' in render_config) == (box_notify_url | length > 0)
           - box_notify_url | length == 0 or render_config.notify.url == box_notify_url
@@ -216,7 +219,8 @@
     - name: Check it against the daemon's
       ansible.builtin.assert:
         that:
-          - render_hook.keys() | sort == ['environment', 'state_dir']
+          - render_hook.keys() | sort == (['environment', 'session_names', 'state_dir'] if watch_session_names | bool else ['environment', 'state_dir'])
+          - not (watch_session_names | bool) or render_hook.session_names == true
           - render_hook.state_dir == agent_home ~ '/.local/state/nucleated'
           - render_hook.environment == render_daemon_config.environment
         quiet: true

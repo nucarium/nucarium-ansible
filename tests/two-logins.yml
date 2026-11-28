@@ -22,3 +22,4 @@ secret_refs:
   vault_read_token: op://Infra/agentbox/vault-read-token
   box_notify_token: op://Infra/agentbox/notify-token
 watch_worktree_actions: true
+watch_session_names: true

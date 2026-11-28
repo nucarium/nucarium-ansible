@@ -23,6 +23,13 @@ target = "none"
 # nucleated too old to know it.
 worktree_actions = true
 {% endif %}
+{% if watch_session_names | default(false) | bool %}
+
+# Send each session's name to Watch, which shows it in place of the short
+# session id. Left out, no name is read or sent. Written only when on, for a
+# nucleated too old to know it.
+session_names = true
+{% endif %}
 {% if nut_enabled | bool %}
 
 # The UPS, as NUT names it. The daemon asks NUT whether the box is running on

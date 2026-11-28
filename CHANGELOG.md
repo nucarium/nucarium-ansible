@@ -4,6 +4,35 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## Session names in Watch
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+Watch can show each session by its name, as the agent or the tool that runs it
+has it, in place of its short id. A box sends names only when its settings say
+so.
+
+### Settings added
+
+| Setting | Default | What it is |
+|---|---|---|
+| `watch_session_names` | `false` | Whether each session's name is sent to Watch. `true` writes `session_names = true` into `nucleated`'s configuration and into the configuration its hook reads in a container; `false` writes nothing, and no name is read on the box or sent. `true` needs a `nucleated` that knows the setting: an older one refuses its configuration. |
+
+No setting is renamed or removed, and a settings file without it works as it
+is.
+
+### Roles and tags
+
+| Role | What changed |
+|---|---|
+| `day2` | Writes `session_names = true` into both of `nucleated`'s configurations when `watch_session_names` is true. |
+
+### A box built with an earlier copy of the recipe
+
+Nothing to do: the setting is off unless you turn it on. To turn it on, set
+`watch_session_names: true` and run `ansible-playbook site.yml --tags day2`.
+
 ## A spool per container, and a proxy that never reaches the box
 
 This entry has no version number of its own: the release that carries it is
