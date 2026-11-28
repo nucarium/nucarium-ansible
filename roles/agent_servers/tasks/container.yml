@@ -42,6 +42,12 @@
     # Everything else that has a quadlet file: gone from the settings, or
     # back on the host with nothing running.
     agent_servers_gone: "{{ agent_servers_quadlet_names | difference(agent_servers_in_containers | map(attribute='name')) }}"
+    # The folder of the broker's tokens each of those containers mounts, and
+    # the folder they are in. None for an environment with a GitHub identity
+    # of its own, which has none of the box's tokens.
+    agent_servers_token_dirs: >-
+      {{ [nucarium_env_tokens_dir] + agent_servers_in_containers | map(attribute='name') | select('in', nucarium_token_envs)
+      | map('regex_replace', '^', nucarium_env_tokens_dir ~ '/') | list }}
   block:
     - name: Check nucleated reads each container's own spool
       ansible.builtin.import_tasks: check-nucleated.yml
@@ -111,6 +117,33 @@
       loop: >-
         {{ ([nucarium_nucleated_spools_dir] if agent_servers_in_containers | length > 0 else [])
         + agent_servers_in_containers | map(attribute='name') | map('regex_replace', '^', nucarium_nucleated_spools_dir ~ '/') | list }}
+
+    # /run is new at every boot, and a container does not start without a
+    # folder it mounts, so each one's folder of tokens is declared for every
+    # boot, as /run/agent-tokens itself is (the users role), and made now.
+    # The broker's, like that one; it fills them when its timers next run.
+    - name: Declare each container's folder of the broker's tokens
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/tmpfiles.d/agent-tokens-environments.conf
+        content: |
+          # Written by the Nucarium box recipe (agent_servers role).
+          {% for path in agent_servers_token_dirs %}
+          d {{ path }} 2750 broker {{ agent_user }} -
+          {% endfor %}
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Create them now
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: broker
+        group: "{{ agent_user }}"
+        mode: "2750"
+      loop: "{{ agent_servers_token_dirs }}"
 
     - name: Write each environment's agent server unit
       become: true

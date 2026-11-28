@@ -51,6 +51,17 @@ claude_sandbox_allow_write: >-
 claude_sandbox_deny_in_allowed: >-
   {{ sandbox_agent_dirs_protected | map('regex_replace', '^', '~/') | list }}
 
+# The nucleus is writable, and every later session and the agent server read
+# these at its root as instructions, or run them as hooks and MCP servers:
+# .claude, .seeds, .mcp.json, AGENTS.md and CLAUDE.md. Read-only to sandboxed
+# commands, as a container environment has them in its own nucleus (the same
+# list, nucarium_nucleus_protected in vars/runtime.yml). The workspace role
+# makes each of them, since the sandbox can only hold what is there when a
+# session starts. nucleate's MCP server and hooks, and Claude Code itself,
+# run outside the sandbox and still write them.
+claude_sandbox_deny_nucleus: >-
+  {{ nucarium_nucleus_protected | map('regex_replace', '^', nucleus_root ~ '/') | list }}
+
 # What sandboxed commands on the host may not read: what container
 # environments hold that may belong to another owner. Each one's own Git
 # settings, signing key and GitHub token (/etc/nucarium/environments/<name>/box/,
@@ -69,8 +80,44 @@ claude_sandbox_deny_in_allowed: >-
 # why such an environment never shares a box with one on the host
 # (tasks/check-environments.yml); this holds for a box that gets one later.
 claude_sandbox_github_envs: "{{ environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('github', 'defined') | list }}"
+
+# Nor the box's own long-lived credentials, which no command an agent runs
+# has a use for, and which the hosts a session may reach give somewhere to
+# send: every Claude login's sign-in (.credentials.json in each
+# environment's config_dir, and in ~/.claude, which a box keeps when its
+# first login is no longer in the settings), which Claude Code reads itself,
+# outside the sandbox; and nucleated's folder, with the Nucarium Watch
+# machine token and the notifier's token, which nucleated, its hooks and
+# nucleate's MCP server read outside it too. `nucleated status` and
+# `nucleate whoami` therefore answer only outside a session's commands.
+#
+# Two are not here, because the commands agents run use them. Git signs each
+# commit inside the sandbox with ~/.ssh/id_ed25519_signing, and npm and pnpm
+# read the packages token from ~/.npmrc (the session hook also gives it to
+# every session as NODE_AUTH_TOKEN): hidden, commits and installs would fail.
+claude_sandbox_credentials: >-
+  {{ ((environments | map(attribute='config_dir', default=agent_home ~ '/.claude') | list) + [agent_home ~ '/.claude'])
+  | unique | map('regex_replace', '$', '/.credentials.json') | list + ['~/.config/nucleated'] }}
+
+# Nor the secret variables of the environments on the host (secret_variables)
+# as files: each one's secret-variables.sh in its folder (a glob, as above),
+# and the copies the session hook leaves in its login's session-env folder,
+# which Claude Code reads itself, outside the sandbox, and runs ahead of
+# each command. This keeps the files from a command, not the variables: every
+# command of a session of that environment has them, which is what a
+# variable is, and can print or send them. And only from sandboxed commands:
+# what runs outside the sandbox as the agent user (Claude Code, its hooks and
+# MCP servers, podman and docker) can read them in any environment on the
+# host, so one host environment's secret variables are not kept from
+# another's sessions.
+claude_sandbox_host_secrets: >-
+  {{ ['/etc/nucarium/environments/*/' ~ nucarium_host_secrets_file]
+  + (environments | selectattr('name', 'in', nucarium_host_secret_envs) | map(attribute='config_dir', default=agent_home ~ '/.claude')
+     | map('regex_replace', '$', '/session-env') | list) }}
 claude_sandbox_deny_read: >-
   {{ (['/etc/nucarium/environments/*/box', nucarium_setups_dir, '~/.local/share/containers']
+  + claude_sandbox_host_secrets
+  + claude_sandbox_credentials
   + (nucarium_github_envs_recorded | default([]) | map(attribute='nucleus') | list)
   + (nucarium_github_envs_recorded | default([]) | map(attribute='config_dir') | list)
   + (claude_sandbox_github_envs | map(attribute='name') | map('regex_replace', '^', agent_home ~ '/workspace-') | list)

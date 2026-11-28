@@ -1,0 +1,17 @@
+---
+# What an earlier copy of the recipe installed to hand the agents a
+# Terraform token. A box built with it still has these; they are stopped and
+# removed. The token had no short-lived form: every copy was the token
+# itself.
+broker_retired_units:
+  - agent-hcp-token.timer
+  - agent-hcp-token.service
+# The token's file in a folder of tokens, and the one it was written through.
+broker_retired_token_names:
+  - hcp
+  - hcp.tmp
+# The fetcher, the token, the credential that read it from the vault, and
+# the host's copies. Each environment's copies are found on the box.
+broker_retired_files: >-
+  {{ ['/usr/local/sbin/agent-hcp-token', '/etc/agent-broker/hcp-token', '/etc/agent-broker/vault-read-token']
+  + broker_retired_token_names | map('regex_replace', '^', nucarium_tokens_dir ~ '/') | list }}

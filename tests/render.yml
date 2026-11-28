@@ -14,6 +14,7 @@
   vars_files:
     - ../roles/workspace/vars/main.yml
     - ../roles/claude/vars/main.yml
+    - ../roles/broker/vars/main.yml
     - ../roles/day2/vars/main.yml
     - ../roles/env_setup/vars/main.yml
     - ../roles/env_runtime/vars/main.yml
@@ -85,7 +86,10 @@
     - name: Check each environment's settings
       ansible.builtin.import_tasks: ../tasks/check-environments.yml
 
-    - name: Check each container environment's secret variables have values
+    - name: Check for settings the recipe no longer has
+      ansible.builtin.import_tasks: ../tasks/check-retired-settings.yml
+
+    - name: Check each environment's secret variables have values
       ansible.builtin.import_tasks: ../tasks/check-secret-variables.yml
 
     - name: Check the logins of container environments
@@ -128,8 +132,6 @@
           dest: agent-backup.service
         - src: ../roles/broker/templates/agent-github-token.j2
           dest: agent-github-token
-        - src: ../roles/broker/templates/agent-hcp-token.j2
-          dest: agent-hcp-token
         - src: ../roles/nut/templates/ups.conf.j2
           dest: ups.conf
         - src: ../roles/nut/templates/upsd.users.j2
@@ -146,6 +148,59 @@
           dest: gitconfig
       loop_control:
         label: "{{ item.dest }}"
+
+    # What the broker would ask GitHub for, as the minter itself says it
+    # (--show reads no key and asks nothing): every token for named
+    # repositories and named permissions, never for all the App has; each
+    # environment's for its own repositories alone; none for an environment
+    # with a GitHub identity of its own; and no repository of another owner,
+    # which one installation's token cannot name.
+    - name: Ask the token minter what each token is for
+      ansible.builtin.command:
+        argv: ["{{ ansible_playbook_python }}", -I, "{{ render_dir }}/agent-github-token", --show]
+      register: render_minter
+      changed_when: false
+
+    - name: Check each token names its repositories and its permissions
+      ansible.builtin.assert:
+        that:
+          - render_tokens.keys() | sort == (['github'] + render_app_envs | map(attribute='name') | map('regex_replace', '^(.*)$', 'environments/\\1/github') | list) | sort
+          - render_minted | map(attribute='permissions') | unique == [nucarium_github_token_permissions]
+          - nucarium_github_token_permissions | length > 0
+          - "nucarium_github_token_permissions.contents == 'write' and nucarium_github_token_permissions.pull_requests == 'write'"
+          - render_minted | map(attribute='repositories') | map('length') | select('lt', 1) | list == []
+          - render_minted | map(attribute='repositories') | map('length') | select('gt', 500) | list == []
+          - render_minted | map(attribute='repositories') | flatten | select('search', '/') | list == []
+          - render_minted | map('list') | map('sort') | unique == [['permissions', 'repositories']]
+          # The host's is for every repository an environment that uses the
+          # App has, and no other.
+          - render_token_repos.github | sort == render_minted | map(attribute='repositories') | flatten | unique | sort
+          - repos | reject('search', '/') | difference(render_token_repos.github) == []
+          - render_expected_token_repos is not defined or render_token_repos == render_expected_token_repos
+        quiet: true
+      vars:
+        render_tokens: "{{ render_minter.stdout | from_json }}"
+        render_minted: "{{ render_tokens.values() | select | list }}"
+        render_app_envs: "{{ environments | rejectattr('github', 'defined') | list }}"
+        render_token_repos: >-
+          {% set ns = namespace(out={}) %}{% for name, asked in render_tokens.items() %}{% set ns.out = ns.out | combine({name: asked.repositories if asked else []}) %}{% endfor %}{{ ns.out }}
+
+    - name: Check each environment's token is for its own repositories alone
+      ansible.builtin.assert:
+        that:
+          - render_asked | sort == render_own | sort
+        quiet: true
+      vars:
+        render_tokens: "{{ render_minter.stdout | from_json }}"
+        render_token: "{{ render_tokens['environments/' ~ env.name ~ '/github'] }}"
+        render_asked: "{{ render_token.repositories if render_token else [] }}"
+        # Its repositories that are github_org's, by name.
+        render_own: >-
+          {% set ns = namespace(out=[]) %}{% for r in env_repos %}{% if '/' not in r %}{% set ns.out = ns.out + [r] %}{% elif r.split('/')[0] | lower == github_org | lower %}{% set ns.out = ns.out + [r.split('/')[1]] %}{% endif %}{% endfor %}{{ ns.out | unique }}
+      loop: "{{ environments | rejectattr('github', 'defined') | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
 
     # The daemon's configuration is the one file here another program parses,
     # so it is read back the way the daemon reads it: as TOML. It must say
@@ -238,9 +293,14 @@
           - ((nucleus_root ~ '/.seeds') in render_backup) == (nucarium_host_envs | length > 0)
           - ((nucleus_root ~ '/.claude') in render_backup) == (nucarium_host_envs | length > 0)
           - nucarium_container_envs | map('regex_replace', '^(.*)$', agent_home ~ '/workspace-\\1/.seeds') | difference(render_backup) == []
+          # Never a login's session-env folder, where the session hook leaves
+          # the secret variables of an environment on the host.
+          - day2_claude_dirs | map('regex_replace', '$', '/session-env') | difference(render_excluded) == []
         quiet: true
       vars:
         render_backup: "{{ lookup('ansible.builtin.file', render_dir ~ '/agent-backup.service').split() }}"
+        # Each path that follows --exclude.
+        render_excluded: "{{ lookup('ansible.builtin.file', render_dir ~ '/agent-backup.service') | regex_findall('--exclude (\\S+)') }}"
 
     - name: Render each agent server's settings and its Claude Code settings
       ansible.builtin.template:
@@ -275,11 +335,28 @@
           - "['~/go/bin', '~/.cargo/bin', '~/.cargo/config.toml', '~/.local/state/nucleated'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
           - render_sandbox.filesystem.denyWrite | select('search', '/[.]repos/') | list | length == 4 * (repos | length)
           - render_sandbox.excludedCommands | sort == ['docker', 'podman']
+          # Nor what later sessions read at the nucleus's root as
+          # instructions, hooks or MCP servers: the same files a container
+          # environment has read-only in its own.
+          - "[nucleus_root ~ '/AGENTS.md', nucleus_root ~ '/CLAUDE.md', nucleus_root ~ '/.mcp.json', nucleus_root ~ '/.claude', nucleus_root ~ '/.seeds'] | difference(render_sandbox.filesystem.denyWrite) | length == 0"
+          - nucarium_nucleus_protected | map('regex_replace', '^', nucleus_root ~ '/') | difference(render_sandbox.filesystem.denyWrite) | length == 0
+          # No command reads the box's own sign-ins: any Claude login's,
+          # this one's and every other environment's, or nucleated's folder,
+          # where the Watch machine token and the notifier's token are.
+          - environments | map(attribute='config_dir', default=agent_home ~ '/.claude') | map('regex_replace', '$', '/.credentials.json') | difference(render_sandbox.filesystem.denyRead) | length == 0
+          - (agent_home ~ '/.claude/.credentials.json') in render_sandbox.filesystem.denyRead
+          - "'~/.config/nucleated' in render_sandbox.filesystem.denyRead"
+          - "[day2_watch_token_file, day2_notify_token_file] | map('dirname') | map('replace', agent_home, '~') | unique == ['~/.config/nucleated']"
           # Nothing of what container environments hold that another owner's
           # may: their own Git settings and keys, the agent user's Podman
           # storage (their secret variables), and the nucleus and login of
           # each with a GitHub identity of its own.
           - "['/etc/nucarium/environments/*/box', '/etc/nucarium/setups', '~/.local/share/containers'] | difference(render_sandbox.filesystem.denyRead) | length == 0"
+          # Nor the secret variables of any environment on the host, as
+          # files: where the playbook writes them, and where the session
+          # hook copies them for Claude Code, in each such login's folder.
+          - "'/etc/nucarium/environments/*/secret-variables.sh' in render_sandbox.filesystem.denyRead"
+          - render_secret_logins | map('regex_replace', '$', '/session-env') | difference(render_sandbox.filesystem.denyRead) | length == 0
           - render_expected_deny_read is not defined or render_sandbox.filesystem.denyRead == render_expected_deny_read
           - render_settings.permissions.allow == ['mcp__nucleate']
           - render_bare | map('regex_replace', '$', '/hooks') | difference(render_sandbox.filesystem.denyWrite) | length == 0
@@ -302,6 +379,9 @@
         render_network: "{{ render_sandbox.network }}"
         render_bare: "{{ repos | map('regex_replace', '^([^/]+)$', github_org ~ '/\\1') | map('regex_replace', '^(.*)$', nucleus_root ~ '/.repos/\\1.git') | list }}"
         render_bare_flat: "{{ repos | map('basename') | map('regex_replace', '^(.*)$', nucleus_root ~ '/.repos/\\1.git') | list }}"
+        render_secret_logins: >-
+          {{ environments | rejectattr('name', 'in', nucarium_container_envs) | selectattr('secret_variables', 'defined') | selectattr('secret_variables')
+          | map(attribute='config_dir', default=agent_home ~ '/.claude') | list }}
       loop: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | list }}"
       loop_control:
         loop_var: env
@@ -383,6 +463,110 @@
       loop: "{{ render_sourced.results }}"
       loop_control:
         label: "{{ item.env.name }}.variables.sh"
+
+    # An environment on the host's secret variables (secret_variables), as a
+    # session gets them: the file the env_setup role writes, beside the
+    # variables in a stand-in for /etc/nucarium/environments, which the
+    # session hook itself, pointed there, copies into the file Claude Code
+    # gives it; that file sourced by bash, as before each command.
+    - name: Create a stand-in for each environment's folder
+      ansible.builtin.file:
+        path: "{{ render_dir }}/etc/{{ env.name }}"
+        state: directory
+        mode: "0700"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    - name: Write each environment's variables there
+      ansible.builtin.template:
+        src: ../roles/env_setup/templates/variables.sh.j2
+        dest: "{{ render_dir }}/etc/{{ env.name }}/variables.sh"
+        mode: "0600"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+
+    - name: Write the secret variables of each environment on the host there
+      ansible.builtin.template:
+        src: ../roles/env_setup/templates/secret-variables.sh.j2
+        dest: "{{ render_dir }}/etc/{{ env.name }}/{{ nucarium_host_secrets_file }}"
+        mode: "0600"
+      loop: "{{ environments | selectattr('name', 'in', nucarium_host_secret_envs) | list }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}"
+      no_log: true
+
+    - name: Point a copy of the session hook at the stand-in
+      ansible.builtin.copy:
+        content: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../roles/claude/files/session-env.sh', rstrip=false) | replace('/etc/nucarium/environments/', render_dir ~ '/etc/') }}"
+        dest: "{{ render_dir }}/session-env.sh"
+        mode: "0700"
+
+    # The file is there and world-readable first, as Claude Code may leave it.
+    - name: Run the hook for each environment, then source what it wrote in bash
+      ansible.builtin.command:
+        argv: "{{ ['bash', '-c', render_session, ansible_playbook_python, render_dir ~ '/session-env.sh', env.name, render_dir ~ '/' ~ env.name ~ '.session-env'] + render_names }}"
+      vars:
+        render_names: "{{ env_variables.keys() | list + (env_secret_variables if env.name in nucarium_host_secret_envs else []) }}"
+        # Runs the hook, sources its file, then prints the file's mode and
+        # the named variables as JSON.
+        render_session: >-
+          set -eu; hook=$1; name=$2; file=$3; shift 3;
+          : > "$file"; chmod 644 "$file";
+          CLAUDE_ENV_FILE=$file bash "$hook" "$name";
+          . "$file";
+          exec "$0" -c 'import json, os, stat, sys; print(json.dumps({"mode": oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)), "variables": {n: os.environ.get(n) for n in sys.argv[2:]}}))' "$file" "$@"
+      environment:
+        PATH: /usr/bin:/bin
+        HOME: "{{ render_dir }}"
+      loop: "{{ environments }}"
+      loop_control:
+        loop_var: env
+        label: "{{ env.name }}.session-env"
+      register: render_sessions
+      changed_when: false
+      no_log: true
+
+    # Every variable and every secret variable, exactly as given, whatever
+    # is in it; and the file the values were copied into is then the
+    # session's user's alone. Without secret variables on the host, the
+    # session has its variables and the file is left as it was.
+    - name: Check each session gets its variables and its secret variables
+      ansible.builtin.assert:
+        that:
+          - render_session.variables == env_variables | combine(render_secret)
+          - render_session.mode == ('0o600' if env.name in nucarium_host_secret_envs else '0o644')
+        quiet: true
+      vars:
+        env: "{{ item.env }}"
+        render_session: "{{ item.stdout | from_json }}"
+        # On the host only: a container environment's are its container's.
+        render_secret: >-
+          {{ dict(env_secret_variables | zip(env_secret_variables | map('extract', nucarium_environment_secrets[env.name] | default({}))))
+          if env.name in nucarium_host_secret_envs else {} }}
+      loop: "{{ render_sessions.results }}"
+      loop_control:
+        label: "{{ item.env.name }}.session-env"
+
+    # On the box the file is root's, read by the agent user through its
+    # group and by nobody else, and its values are never logged.
+    - name: Check how the env_setup role writes the file
+      ansible.builtin.assert:
+        that:
+          - render_writes | length == 1
+          - render_writes[0]['ansible.builtin.template'].owner == 'root'
+          - render_writes[0]['ansible.builtin.template'].group is search('agent_user')
+          - render_writes[0]['ansible.builtin.template'].mode == '0640'
+          - render_writes[0].no_log is sameas true
+          - render_writes[0].loop is search('nucarium_host_secret_envs')
+        quiet: true
+      vars:
+        render_writes: >-
+          {% set ns = namespace(out=[]) %}{% for t in lookup('ansible.builtin.file', playbook_dir ~ '/../roles/env_setup/tasks/main.yml') | from_yaml %}{% if (t['ansible.builtin.template'] | default({})).src | default('') == 'secret-variables.sh.j2' %}{% set ns.out = ns.out + [t] %}{% endif %}{% endfor %}{{ ns.out }}
 
     # The script as the env_setup role stores it, from the same expression:
     # text that looks like a template ({{, {% or {#) is kept as written.
@@ -531,6 +715,9 @@
           - render_expected_secrets is not defined or render_lines | select('match', 'Secret=') | list == render_expected_secrets[env.name]
           # With a GitHub identity of its own, nothing of the GitHub App.
           - not env_github or render_text is not search('/run/agent-tokens')
+          # Never the host's folder of tokens, which holds the token for
+          # every environment's repositories.
+          - render_volumes | select('match', '/run/agent-tokens:') | list == []
           - render_env.AGENT_SERVER_START == '/etc/nucarium/environments/' ~ env.name ~ '/start.sh'
           - render_env.AGENT_SERVER_RUNTIME == 'container'
           - render_env.AGENT_SERVER_NAME == env.name
@@ -578,7 +765,8 @@
         # own spool, at the shared spool's path, and the Git settings of an
         # environment with a GitHub identity of its own, which are its own
         # folder at the box's path; such an environment has no GitHub App
-        # token.
+        # token. The others have their own folder of the broker's tokens
+        # where the host has the box's, never the host's folder itself.
         render_mounts: >-
           {{ [['rw', render_nucleus, render_nucleus],
               ['rw', render_nucleus ~ '/.repos', render_nucleus ~ '/.repos'],
@@ -593,7 +781,7 @@
               ['ro', agent_home ~ '/.local/bin', agent_home ~ '/.local/bin'],
               ['ro', agent_home ~ '/.config/nucleated-hook', agent_home ~ '/.config/nucleated-hook'],
               ['rw', agent_home ~ '/.local/state/nucleated/spools/' ~ env.name, agent_home ~ '/.local/state/nucleated/spool']]
-          + ([] if env_github else [['ro', '/run/agent-tokens', '/run/agent-tokens']])
+          + ([] if env_github else [['ro', '/run/agent-tokens/environments/' ~ env.name, '/run/agent-tokens']])
           + [['ro', '/etc/nucarium/environments/' ~ env.name, '/etc/nucarium/environments/' ~ env.name],
              ['ro', '/usr/local/lib/nucarium', '/usr/local/lib/nucarium'],
              ['ro', '/etc/nucarium/environments/' ~ env.name ~ '/box' if env_github else '/etc/nucarium/box', '/etc/nucarium/box'],
@@ -906,6 +1094,54 @@
         render_keys: >-
           {{ render_identity_envs | rejectattr('setup', 'defined') | map(attribute='name') | list
           + render_identity_envs | selectattr('setup', 'defined') | map(attribute='setup') | unique | list }}
+
+    # The recipe handles no Terraform token: nothing a box would receive
+    # names the one an earlier copy handed out, what fetched it or the
+    # helper that read it, and a box that has them loses them.
+    - name: Look for the Terraform token in what was rendered
+      ansible.builtin.command:
+        argv: [grep, -rlE, "hcp|agentvault|vault-read-token", "{{ render_dir }}"]
+      register: render_terraform_token
+      changed_when: false
+      failed_when: render_terraform_token.rc != 1
+
+    - name: Check a box built with an earlier copy loses the token and what fetched it
+      ansible.builtin.assert:
+        that:
+          - "['agent-hcp-token.timer', 'agent-hcp-token.service'] | difference(broker_retired_units) == []"
+          - "['/usr/local/sbin/agent-hcp-token', '/etc/agent-broker/hcp-token', '/etc/agent-broker/vault-read-token', '/run/agent-tokens/hcp'] | difference(broker_retired_files) == []"
+          - "'hcp' in broker_retired_token_names"
+        quiet: true
+
+    # A secret variable's value is in the file of its environment's secret
+    # variables and in what the hook copied from it, and in nothing else
+    # the playbook renders: no unit, settings file, variables file or summary.
+    # Looked for by its first word, since the file holds it shell-quoted.
+    - name: Look for each secret variable's value in what was rendered
+      ansible.builtin.command:
+        argv: [grep, -rlF, -e, "{{ nucarium_environment_secrets[item.env][item.name].split(' ') | first }}", "{{ render_dir }}"]
+      loop: "{{ nucarium_host_env_secrets }}"
+      loop_control:
+        label: "{{ item.env }}: {{ item.name }}"
+      register: render_secret_found
+      changed_when: false
+      no_log: true
+
+    - name: Check it is only where the session hook reads it
+      ansible.builtin.assert:
+        that:
+          - "[render_dir ~ '/etc/' ~ item.item.env ~ '/' ~ nucarium_host_secrets_file, render_dir ~ '/' ~ item.item.env ~ '.session-env'] | difference(item.stdout_lines) == []"
+          - item.stdout_lines | difference(render_secret_files) == []
+        quiet: true
+      vars:
+        # Those two files of every environment on the host with secret
+        # variables: the environments of a setup share its values.
+        render_secret_files: >-
+          {{ nucarium_host_secret_envs | map('regex_replace', '^(.*)$', render_dir ~ '/etc/\1/' ~ nucarium_host_secrets_file) | list
+          + nucarium_host_secret_envs | map('regex_replace', '^(.*)$', render_dir ~ '/\1.session-env') | list }}
+      loop: "{{ render_secret_found.results }}"
+      loop_control:
+        label: "{{ item.item.env }}: {{ item.item.name }}"
 
     - name: Record the values the roles derive
       ansible.builtin.copy:

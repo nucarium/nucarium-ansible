@@ -1,6 +1,53 @@
 ---
-# The broker user holds the long-lived secrets. Agents only ever see the
-# short-lived tokens it writes to /run/agent-tokens.
+# The broker user holds the long-lived secrets, and writes what the agents
+# get of them to /run/agent-tokens: the GitHub App's one-hour tokens, each
+# for named repositories and permissions (vars/runtime.yml), and never the
+# App's key.
+
+# An earlier copy of the recipe also handed the agents a long-lived Terraform
+# token. A box built with it still has the token and what fetched it; they
+# are stopped and removed (vars/main.yml). The terraform package stays.
+- name: Find the Terraform token's units
+  ansible.builtin.stat:
+    path: /etc/systemd/system/{{ item }}
+  loop: "{{ broker_retired_units }}"
+  register: broker_retired
+
+- name: Stop them
+  ansible.builtin.systemd_service:
+    name: "{{ item.item }}"
+    enabled: false
+    state: stopped
+  loop: "{{ broker_retired.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+
+- name: Remove their units
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ item }}
+    state: absent
+  loop: "{{ broker_retired_units }}"
+  register: broker_retired_removed
+
+- name: Have systemd forget them  # noqa: no-handler
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: broker_retired_removed is changed
+
+- name: Find the copies of the token each environment was handed
+  ansible.builtin.find:
+    paths: "{{ nucarium_env_tokens_dir }}"
+    patterns: "{{ broker_retired_token_names }}"
+    recurse: true
+    depth: 2
+  register: broker_retired_given
+
+- name: Remove the token, its copies and what fetched it
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ broker_retired_files + broker_retired_given.files | map(attribute='path') | list }}"
 
 - name: GitHub App token
   when: secrets.github_app_pem is defined
@@ -39,56 +86,5 @@
     - name: Mint a token now
       ansible.builtin.systemd_service:
         name: agent-github-token.service
-        state: started
-      changed_when: false
-
-- name: HCP Terraform token
-  when: hcp_mode != 'none'
-  block:
-    - name: Install the vault read credential
-      ansible.builtin.copy:
-        dest: /etc/agent-broker/vault-read-token
-        content: "{{ secrets.vault_read_token }}"
-        owner: broker
-        group: broker
-        mode: "0600"
-      no_log: true
-      when: hcp_mode == 'vault'
-
-    - name: Install the HCP token itself
-      ansible.builtin.copy:
-        dest: /etc/agent-broker/hcp-token
-        content: "{{ secrets.hcp_token }}"
-        owner: broker
-        group: broker
-        mode: "0600"
-      no_log: true
-      when: hcp_mode == 'file'
-
-    - name: Install the token fetcher
-      ansible.builtin.template:
-        src: agent-hcp-token.j2
-        dest: /usr/local/sbin/agent-hcp-token
-        mode: "0755"
-
-    - name: Install the fetcher's service and timer
-      ansible.builtin.copy:
-        src: "{{ item }}"
-        dest: /etc/systemd/system/{{ item }}
-        mode: "0644"
-      loop:
-        - agent-hcp-token.service
-        - agent-hcp-token.timer
-
-    - name: Start the 20-minute refresh
-      ansible.builtin.systemd_service:
-        name: agent-hcp-token.timer
-        enabled: true
-        state: started
-        daemon_reload: true
-
-    - name: Fetch a token now
-      ansible.builtin.systemd_service:
-        name: agent-hcp-token.service
         state: started
       changed_when: false

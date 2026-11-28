@@ -31,11 +31,12 @@
     env_allowed_hosts: "{{ env.allowed_hosts | default([], true) }}"
     env_variables: "{{ env.variables | default({}, true) }}"
     env_setup_script: "{{ env.setup_script | default('', true) }}"
+    # The names of its secret variables, in a container or on the host.
     # What only a container environment can have: its own repositories (the
-    # box's repos when it has none), the names of its secret variables, its
-    # own GitHub identity (empty: the box's), and its start script. The
-    # folder of Git settings its container has at nucarium_box_dir: its own
-    # with an identity of its own, else the box's.
+    # box's repos when it has none), its own GitHub identity (empty: the
+    # box's), and its start script. The folder of Git settings its container
+    # has at nucarium_box_dir: its own with an identity of its own, else the
+    # box's.
     env_repos: "{{ env.repos if env.repos is defined else repos }}"
     env_secret_variables: "{{ env.secret_variables | default([], true) }}"
     env_github: "{{ env.github | default({}, true) }}"
@@ -68,16 +69,11 @@
           - environments | map(attribute='config_dir', default='') | unique | length == environments | length
           - environments | map(attribute='config_dir', default='/') | select('match', '^/') | length == environments | length
           - watch_target in ['hosted', 'none']
-          - hcp_mode in ['none', 'file', 'vault']
-          - hcp_mode == 'none' or secret_refs.hcp_token | length > 0
-          - hcp_mode != 'vault' or secret_refs.vault_read_token | length > 0
           - box_notify_url | default('', true) | trim == '' or box_notify_url | trim is match(notify_url_pattern)
         fail_msg: >-
           group_vars/all.yml: environments needs at least one entry, each
           with its own name (lower-case letters, digits and hyphens) and its
-          own config_dir (a full path, or left out for the first login); watch_target is hosted or none; hcp_mode is none,
-          file or vault, and file and vault need secret_refs.hcp_token (vault
-          also secret_refs.vault_read_token); box_notify_url is empty or an
+          own config_dir (a full path, or left out for the first login); watch_target is hosted or none; box_notify_url is empty or an
           https:// address (http:// only for localhost) with no username,
           password or #fragment in it.
         quiet: true
@@ -87,16 +83,22 @@
       ansible.builtin.import_tasks: tasks/check-environments.yml
       tags: always
 
+    - name: Check for settings the recipe no longer has
+      ansible.builtin.import_tasks: tasks/check-retired-settings.yml
+      tags: always
+
+    # Not the two references a Terraform token had, which a settings file
+    # from an earlier copy may still hold: nothing uses them.
     - name: Read secrets from 1Password on the workstation
       ansible.builtin.set_fact:
         secrets: "{{ secrets | default({}) | combine({item.key: lookup('ansible.builtin.pipe', 'op read ' ~ (item.value | quote))}) }}"
-      loop: "{{ secret_refs | dict2items | selectattr('value') | list }}"
+      loop: "{{ secret_refs | dict2items | selectattr('value') | rejectattr('key', 'in', ['hcp_token', 'vault_read_token']) | list }}"
       loop_control:
         label: "{{ item.key }}"
       no_log: true
       tags: always
 
-    - name: Check each container environment's secret variables have values
+    - name: Check each environment's secret variables have values
       ansible.builtin.import_tasks: tasks/check-secret-variables.yml
       tags: always
 

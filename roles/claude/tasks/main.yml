@@ -68,21 +68,39 @@
         path: "{{ agent_home }}/.claude/hooks/session-env.sh"
         state: absent
 
-    - name: Install the Terraform credentials helper
-      ansible.builtin.copy:
-        src: "{{ item.src }}"
-        dest: "{{ agent_home }}/{{ item.dest }}"
-        mode: "{{ item.mode }}"
-      loop:
-        - src: terraform-credentials-agentvault
-          dest: .terraform.d/plugins/terraform-credentials-agentvault
-          mode: "0755"
-        - src: terraformrc
-          dest: .terraformrc
-          mode: "0644"
-      loop_control:
-        label: "{{ item.dest }}"
-      when: hcp_mode != 'none'
+    # An earlier copy of the recipe gave Terraform a credentials helper that
+    # read the broker's token. The helper goes, and its block in
+    # ~/.terraformrc, which that copy wrote whole; a file with nothing else
+    # in it goes too, and anything else in it is kept.
+    - name: Remove the Terraform credentials helper an earlier copy installed
+      ansible.builtin.file:
+        path: "{{ agent_home }}/.terraform.d/plugins/terraform-credentials-agentvault"
+        state: absent
+
+    - name: Look for the agent user's .terraformrc
+      ansible.builtin.stat:
+        path: "{{ agent_home }}/.terraformrc"
+      register: claude_terraformrc
+
+    - name: Take the helper out of it
+      ansible.builtin.replace:
+        path: "{{ agent_home }}/.terraformrc"
+        regexp: '(?s)credentials_helper "agentvault" \{.*?\}\n?'
+        replace: ""
+      when: claude_terraformrc.stat.isreg | default(false)
+
+    - name: Look at what is left of it
+      ansible.builtin.stat:
+        path: "{{ agent_home }}/.terraformrc"
+      register: claude_terraformrc_left
+
+    - name: Remove it when nothing is
+      ansible.builtin.file:
+        path: "{{ agent_home }}/.terraformrc"
+        state: absent
+      when:
+        - claude_terraformrc_left.stat.isreg | default(false)
+        - claude_terraformrc_left.stat.size == 0
 
     # Optional context for the agents, kept in agent-context/ beside the
     # playbook. AGENTS.md is installed by the workspace role, once the

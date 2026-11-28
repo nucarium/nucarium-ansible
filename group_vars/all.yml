@@ -59,7 +59,10 @@ github_org: your-org
 # The repositories agents can add to a session. A bare name is a repository
 # in github_org; write owner/name for one that lives elsewhere. Each is
 # cloned bare into the nucleus, and sessions see it under its GitHub name
-# (your-org/web). The agents' GitHub App must be installed on every one.
+# (your-org/web). The agents' GitHub App must be installed on every one of
+# github_org's: the agents' tokens name each, and GitHub refuses a token
+# that names one the App is not installed on. After changing the list, run
+# `--tags broker,workspace`.
 repos:
   - web
   - api
@@ -70,6 +73,22 @@ repos:
 # installation's address (…/installations/<id>). Keep the quotes.
 github_app_client_id: Iv23example
 github_app_installation_id: "12345678"
+
+# What the GitHub App's tokens may do. The broker mints the agents' tokens
+# for the repositories above (and each environment's own) and these
+# permissions only, whatever else the App was given: contents to clone,
+# fetch and push, pull_requests to open and update pull requests, checks to
+# read how CI went. Each is a repository permission as GitHub's API names it,
+# with read or write. GitHub refuses a token that asks for one the App does
+# not have, so list no more than the App has; if your agents comment on
+# issues or dispatch workflows, and the App has those, add issues: write or
+# actions: write. Leave workflows out unless you have decided agents may
+# change CI. Changing it needs `--tags broker`.
+github_app_token_permissions:
+  contents: write
+  pull_requests: write
+  checks: read
+  metadata: read
 
 # ---------------------------------------------------------------------------
 # Environments
@@ -86,8 +105,8 @@ github_app_installation_id: "12345678"
 # cannot see its credentials or its code. Environments of different owners
 # need every environment on the box in a container: sessions on the host
 # run podman outside their sandbox, as the user that owns every container's
-# secrets, so the playbook refuses github and secret_variables on a box
-# with an environment on the host.
+# secrets, so the playbook refuses github, and secret_variables on a
+# container environment, on a box with an environment on the host.
 #
 #   name        A short label: lower-case letters, digits and hyphens. It
 #               names the service (agent-server@<name>, or agent-env-<name>
@@ -154,6 +173,28 @@ github_app_installation_id: "12345678"
 #                  environment. Not secret: anything in this file can be read
 #                  by the agents. Quote every value ("3.10", "0755", "true"):
 #                  unquoted, YAML changes them, so the playbook refuses them.
+#   secret_variables  Names of variables whose values are secret, one per
+#                  line, set in every new session of the environment (a
+#                  Terraform token, say). The values are not in this file:
+#                  each is environment_secrets.<env>.<NAME> in a file of
+#                  your own you give the playbook
+#                  (-e @environment-secrets.yml, an Ansible Vault file say),
+#                  which leaves secret_refs as they are; a whole secrets
+#                  given with -e may hold them as secrets.environments
+#                  instead. Quote every value. The playbook stops, changing
+#                  nothing, when one has no value. A name may not also be in
+#                  variables, and GITHUB_TOKEN and GH_TOKEN need github.
+#                  On the host they are kept in
+#                  /etc/nucarium/environments/<env>/secret-variables.sh,
+#                  which only root and the agent user read, and sandboxed
+#                  commands cannot. Every command of a session has the
+#                  variables themselves and can print or send them, and
+#                  they are not kept from the other environments on the
+#                  host, which run as the same user: for that, use a
+#                  container. There each is the agent user's Podman secret
+#                  nucarium-env-<env>-<name>, set in its container alone,
+#                  its agent server included, and not in the image: the
+#                  setup script does not get them.
 #   setup_script   A bash script, run as root in /root before the agent
 #                  server starts: at every boot, and once more
 #                  whenever you change it. Running it again never restarts an
@@ -207,20 +248,6 @@ github_app_installation_id: "12345678"
 #   repos            Its own repositories, in place of the box's repos, in
 #                    the same form: a bare name is in github_org, owner/name
 #                    names its owner. Its nucleus offers only these.
-#   secret_variables Names of variables whose values are secret, one per
-#                    line, set in its container, its agent server and every
-#                    session (a Terraform token, say). The values are not
-#                    in this file: each is environment_secrets.<env>.<NAME>
-#                    in a file of your own you give the playbook
-#                    (-e @environment-secrets.yml, an Ansible Vault file
-#                    say), which leaves secret_refs as they are; a whole
-#                    secrets given with -e may hold them as
-#                    secrets.environments instead. The playbook stops,
-#                    changing nothing, when one has no value. Each is kept
-#                    as the agent user's Podman secret
-#                    nucarium-env-<env>-<name>. A name may not also be in
-#                    variables, and GITHUB_TOKEN and GH_TOKEN need github.
-#                    Not in the image: the setup script does not get them.
 #   github           Its own GitHub identity: name: and email:, for its
 #                    commits. It needs GITHUB_TOKEN in secret_variables,
 #                    a token of that GitHub account, which its Git uses for
@@ -250,7 +277,7 @@ github_app_installation_id: "12345678"
 #                    and every session.
 #
 # Changing these needs
-# `--tags claude,env_runtime,env_setup,workspace,agent_servers`; the
+# `--tags broker,claude,env_runtime,env_setup,workspace,agent_servers`; the
 # container takes them up at its next start. Sandboxed commands on the host
 # cannot read a container environment's own Git settings and key, the
 # Podman storage that holds the secret variables, or, once it has had
@@ -318,8 +345,8 @@ environments:
 # key, the setup's, made once on the box: register it once, as the closing
 # message says.
 #
-# A setup with github or secret_variables needs every setup on the box in a
-# container, as environments do. If a setup gives up its github, its pairs'
+# A setup in a container with github or secret_variables needs every setup
+# on the box in a container, as environments do. If a setup gives up its github, its pairs'
 # names and logins stay on the box and may not be used without it: rename
 # the setup or the login, which means new sign-ins.
 #
@@ -492,16 +519,6 @@ nvm_version: "0.40.8"
 # subdomain. Changing it needs `--tags claude`, and new sessions see it.
 sandbox_extra_allowed_domains: []
 
-# HCP Terraform token for local module downloads:
-#   none   No Terraform on this box.
-#   file   The token is read from secret_refs.hcp_token when the playbook
-#          runs and kept on the box by the token broker.
-#   vault  The box reads secret_refs.hcp_token from 1Password every 20
-#          minutes, using the service-account token in
-#          secret_refs.vault_read_token. Use this when several boxes share
-#          one token.
-hcp_mode: none
-
 # ---------------------------------------------------------------------------
 # Secrets
 # ---------------------------------------------------------------------------
@@ -517,8 +534,6 @@ hcp_mode: none
 #   ubuntu_pro_token         Ubuntu Pro, for kernel fixes without a reboot.
 #   github_app_pem           The GitHub App's private key (.pem file).
 #   npm_token                A classic token with only read:packages.
-#   hcp_token                See hcp_mode.
-#   vault_read_token         See hcp_mode.
 #   watch_machine_token      A Nucarium Watch machine token, minted in the
 #                            Watch console. Empty: run `nucleate login` on
 #                            the box instead.
@@ -537,8 +552,6 @@ secret_refs:
   ubuntu_pro_token: ""
   github_app_pem: op://Infra/agentbox/github-app-private-key.pem
   npm_token: op://Infra/agentbox/npm-read-packages-token
-  hcp_token: ""
-  vault_read_token: ""
   watch_machine_token: ""
   box_notify_token: ""
   restic_repository: ""

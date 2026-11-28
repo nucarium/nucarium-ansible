@@ -4,16 +4,12 @@
     name: python3-debian
     state: present
 
-- name: Remove the one-line package sources older releases wrote
-  # Replaced by the .sources files below; apt warns about sources it finds
+- name: Remove the one-line package source older releases wrote
+  # Replaced by the .sources file below; apt warns about a source it finds
   # twice.
   ansible.builtin.file:
-    path: /etc/apt/sources.list.d/{{ item }}.list
+    path: /etc/apt/sources.list.d/github-cli.list
     state: absent
-  loop:
-    - github-cli
-    - hashicorp
-    - 1password
 
 - name: Create the keyring folder
   ansible.builtin.file:
@@ -43,56 +39,6 @@
     name: gh
     state: present
     update_cache: "{{ toolchain_github_source is changed }}"
-
-- name: Terraform and the vault CLI
-  when: hcp_mode != 'none'
-  block:
-    - name: Add the HashiCorp and 1Password signing keys
-      ansible.builtin.get_url:
-        url: "{{ item.url }}"
-        dest: /etc/apt/keyrings/{{ item.name }}.asc
-        mode: "0644"
-      loop:
-        - name: hashicorp
-          url: https://apt.releases.hashicorp.com/gpg
-        - name: 1password
-          url: https://downloads.1password.com/linux/keys/1password.asc
-
-    - name: Add the HashiCorp package source
-      ansible.builtin.deb822_repository:
-        name: hashicorp
-        types: deb
-        uris: https://apt.releases.hashicorp.com
-        suites: "{{ ansible_facts.distribution_release }}"
-        components: main
-        architectures: "{{ nucarium_arch.deb }}"
-        signed_by: /etc/apt/keyrings/hashicorp.asc
-      register: toolchain_hashicorp_source
-
-    - name: Install Terraform
-      ansible.builtin.apt:
-        name: terraform
-        state: present
-        update_cache: "{{ toolchain_hashicorp_source is changed }}"
-
-    - name: Add the 1Password package source
-      ansible.builtin.deb822_repository:
-        name: 1password
-        types: deb
-        uris: https://downloads.1password.com/linux/debian/{{ nucarium_arch.deb }}
-        suites: stable
-        components: main
-        architectures: "{{ nucarium_arch.deb }}"
-        signed_by: /etc/apt/keyrings/1password.asc
-      register: toolchain_1password_source
-      when: hcp_mode == 'vault'
-
-    - name: Install the 1Password CLI
-      ansible.builtin.apt:
-        name: 1password-cli
-        state: present
-        update_cache: "{{ toolchain_1password_source is changed }}"
-      when: hcp_mode == 'vault'
 
 - name: Check the installed Go version
   ansible.builtin.command: /usr/local/go/bin/go version

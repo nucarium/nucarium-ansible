@@ -62,15 +62,39 @@
     mode: "0644"
 
 # The key the toolchain role made for the box, whose public half is
-# registered on GitHub for signing.
+# registered on GitHub for signing. It is in the agent user's home, where an
+# agent can put a link in its place, so it is read as the agent user: a link
+# to a file only root reads (the GitHub App's key, say) is refused, where
+# root would copy it to a file the agent user owns. A few seconds and a few
+# kilobytes at most, so that a pipe or an endless file there holds nothing
+# up. Root writes it into root's folder, beside the old one and then in its
+# place. All of it on the box: the key is never sent to your workstation.
 - name: Copy the commit-signing key pair
-  ansible.builtin.copy:
-    src: "{{ agent_home }}/.ssh/id_ed25519_signing{{ item.suffix }}"
-    dest: "{{ nucarium_box_dir }}/signing{{ item.suffix }}"
-    remote_src: true
-    owner: "{{ item.owner }}"
-    group: "{{ item.owner }}"
-    mode: "{{ item.mode }}"
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    new=$(mktemp "$KEY_DEST.XXXXXX")
+    trap 'rm -f "$new"' EXIT
+    timeout 10 runuser -u "$KEY_READER" -- head -c 16384 -- "$KEY_SRC" > "$new"
+    test -s "$new"
+    chown "$KEY_OWNER:$KEY_OWNER" "$new"
+    chmod "$KEY_MODE" "$new"
+    if ! cmp -s "$new" "$KEY_DEST"; then
+      mv -f "$new" "$KEY_DEST"
+      echo copied
+    fi
+    chown "$KEY_OWNER:$KEY_OWNER" "$KEY_DEST"
+    chmod "$KEY_MODE" "$KEY_DEST"
+  args:
+    executable: /bin/bash
+  environment:
+    KEY_READER: "{{ agent_user }}"
+    KEY_SRC: "{{ agent_home }}/.ssh/id_ed25519_signing{{ item.suffix }}"
+    KEY_DEST: "{{ nucarium_box_dir }}/signing{{ item.suffix }}"
+    KEY_OWNER: "{{ item.owner }}"
+    KEY_MODE: "{{ item.mode }}"
+  register: env_runtime_signing_copied
+  changed_when: "'copied' in env_runtime_signing_copied.stdout"
   loop:
     - suffix: ""
       owner: "{{ agent_user }}"

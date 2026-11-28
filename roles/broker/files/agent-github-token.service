@@ -9,3 +9,7 @@ User=broker
 ExecStart=/usr/local/sbin/agent-github-token
 Restart=on-failure
 RestartSec=30
+# 2: GitHub refused what a token was asked for (a repository the App is not
+# installed on, a permission it does not have). Trying again in 30 seconds
+# changes nothing; the timer tries again, and the settings need changing.
+RestartPreventExitStatus=2

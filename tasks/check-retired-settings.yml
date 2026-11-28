@@ -1,0 +1,14 @@
+---
+# Settings the recipe no longer has, which a settings file from an earlier
+# copy may still set. hcp_mode asked for a Terraform token on the box; left
+# out, or none, it asks for nothing and is ignored. Imported by site.yml
+# before anything is read or changed, and by tests/render.yml.
+- name: Stop if the settings still ask for a Terraform token
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml: hcp_mode is {{ hcp_mode | to_json }}, and the
+      recipe no longer handles a Terraform token. Delete hcp_mode,
+      secret_refs.hcp_token and secret_refs.vault_read_token, and name the
+      token's variable (TF_TOKEN_app_terraform_io, say) in an environment's
+      secret_variables. Nothing on the box has been changed.
+  when: hcp_mode | default('none', true) != 'none'

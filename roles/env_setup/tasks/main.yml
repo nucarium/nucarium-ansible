@@ -44,6 +44,39 @@
     label: "{{ env.name }}"
   register: env_setup_variables
 
+# The secret variables of each environment on the host (secret_variables),
+# whose values are environment_secrets.<env>.<NAME>, which
+# tasks/check-secret-variables.yml made sure of before anything changed.
+# Root's, in root's folder, so that no command an agent runs can change it;
+# read by the agent user through its group, since the session hook runs as
+# that user, and by nobody else. Shell-quoted, as the variables are. Written
+# beside its place and renamed into it, and never logged. A container
+# environment has its secret variables as Podman secrets (the env_runtime
+# role) and none here: its container has this folder mounted.
+- name: Write the secret variables of each environment on the host
+  ansible.builtin.template:
+    src: secret-variables.sh.j2
+    dest: "{{ env_setup_etc_dir }}/{{ env.name }}/{{ nucarium_host_secrets_file }}"
+    owner: root
+    group: "{{ agent_user }}"
+    mode: "0640"
+  loop: "{{ environments | selectattr('name', 'in', nucarium_host_secret_envs) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+  no_log: true
+
+# One that lists none any more, or has moved into a container. The folder of
+# an environment that is gone is removed whole, below.
+- name: Remove the secret variables of each environment that has none on the host
+  ansible.builtin.file:
+    path: "{{ env_setup_etc_dir }}/{{ env.name }}/{{ nucarium_host_secrets_file }}"
+    state: absent
+  loop: "{{ environments | rejectattr('name', 'in', nucarium_host_secret_envs) | list }}"
+  loop_control:
+    loop_var: env
+    label: "{{ env.name }}"
+
 # host or container. Read by the setup runner, and by both agent server
 # units of the environment, so that only the one it names runs
 # (agent-server-runtime, the agent_servers role).

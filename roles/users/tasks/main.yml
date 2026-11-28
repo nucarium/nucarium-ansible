@@ -9,22 +9,31 @@
 - name: Look up the agent user's id and home folder
   ansible.builtin.include_tasks: ../../../tasks/agent-user.yml
 
+# Whatever is done in the agent user's home is done as the agent user, never
+# as root: an agent can put a link anywhere in it, and root would follow the
+# link and create, own or overwrite what it leads to. As the agent user, a
+# link leads only to what that user could change anyway.
 - name: Create the agent user's SSH folder
   ansible.builtin.file:
     path: "{{ agent_home }}/.ssh"
     state: directory
-    owner: "{{ agent_user }}"
-    group: "{{ agent_user }}"
     mode: "0700"
+  become: true
+  become_user: "{{ agent_user }}"
+
+# Read as root, which your own file needs, and written as the agent user.
+- name: Read the operator's keys
+  ansible.builtin.slurp:
+    src: /home/{{ operator_user }}/.ssh/authorized_keys
+  register: users_operator_keys
 
 - name: Let the operator's keys log in as the agent user
   ansible.builtin.copy:
-    remote_src: true
-    src: /home/{{ operator_user }}/.ssh/authorized_keys
+    content: "{{ users_operator_keys.content | b64decode }}"
     dest: "{{ agent_home }}/.ssh/authorized_keys"
-    owner: "{{ agent_user }}"
-    group: "{{ agent_user }}"
     mode: "0600"
+  become: true
+  become_user: "{{ agent_user }}"
 
 - name: Let the agent user's services run with nobody logged in
   ansible.builtin.command: loginctl enable-linger {{ agent_user }}
@@ -46,7 +55,7 @@
     group: broker
     mode: "0700"
 
-- name: Declare the short-lived token folder
+- name: Declare the folder the broker hands the agents their tokens in
   ansible.builtin.copy:
     dest: /etc/tmpfiles.d/agent-tokens.conf
     content: "d /run/agent-tokens 2750 broker {{ agent_user }} -\n"
@@ -55,7 +64,7 @@
 
 # Done here, not in a handler: the broker role writes into the folder later
 # in the same run.
-- name: Create the short-lived token folder  # noqa: no-handler
+- name: Create that folder  # noqa: no-handler
   ansible.builtin.command: systemd-tmpfiles --create /etc/tmpfiles.d/agent-tokens.conf
   changed_when: true
   when: users_tmpfiles is changed

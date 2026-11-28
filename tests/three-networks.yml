@@ -2,6 +2,10 @@
 # A third shape to render: one environment for each network, one in a
 # container and one on the host by name, an environment's own hosts,
 # variables whose values a careless quoting would break, and a setup script.
+# A second container environment, infra, has repositories of its own, one of
+# them github_org's written with its owner and one another owner's.
+# main, on the host, has secret variables, one with a value a careless
+# quoting would break; no container environment here has secrets of its own.
 # A container environment needs a nucleate that checks git config.
 # The script and one value hold text Ansible would read as a template, so
 # they are marked !unsafe, as the comment in group_vars/all.yml says.
@@ -9,6 +13,11 @@ nucleate_version: "0.7.0"
 # An npm token, so that the container unit is rendered with its secret.
 secrets:
   npm_token: render-only
+# A stand-in for the file of environment secrets (-e @environment-secrets.yml).
+environment_secrets:
+  main:
+    API_TOKEN: "render-only-host-secret it's \"quoted\", $HOME, $(id -u), `id -u` and ${PATH}\nline  two\\ and 'more'\n"
+    DEPLOY_KEY: render-only-host-secret-plain
 environments:
   - name: main
     network: limited
@@ -27,6 +36,9 @@ environments:
       VERSION: "3.10"
       MODE: "0755"
       GO_FORMAT: !unsafe "{{.Names}}, {% raw %} and {# not a comment"
+    secret_variables:
+      - API_TOKEN
+      - DEPLOY_KEY
   - name: open
     config_dir: /home/agent/.claude-open
     runtime: host
@@ -43,9 +55,24 @@ environments:
     network: none
     variables:
       NODE_ENV: test
+  - name: infra
+    config_dir: /home/agent/.claude-infra
+    runtime: container
+    repos:
+      - Your-Org/infra
+      - other-org/modules
 
 # The environments that run in a container.
-render_expected_container_envs: [closed]
+render_expected_container_envs: [closed, infra]
+
+# The repositories each GitHub token names, by its file: the host's, then
+# each environment's own. Another owner's repository is in none.
+render_expected_token_repos:
+  github: [web, api, infra]
+  environments/main/github: [web, api]
+  environments/open/github: [web, api]
+  environments/closed/github: [web, api]
+  environments/infra/github: [infra]
 
 # The script each environment stores, character for character.
 render_expected_setup_scripts:
@@ -72,6 +99,13 @@ render_expected_summaries:
     allowed_hosts: 0
     repos: [your-org/web, your-org/api]
     variables: 1
+    secrets: 0
+    setup_script: false
+  infra:
+    network: limited
+    allowed_hosts: 0
+    repos: [Your-Org/infra, other-org/modules]
+    variables: 0
     secrets: 0
     setup_script: false
 

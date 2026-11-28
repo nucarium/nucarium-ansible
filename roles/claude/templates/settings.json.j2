@@ -13,7 +13,7 @@
     "excludedCommands": ["podman", "docker"],
     "filesystem": {
       "allowWrite": {{ claude_sandbox_allow_write | to_json }},
-      "denyWrite": {{ (claude_sandbox_deny_in_allowed + claude_sandbox_deny_write) | to_json }},
+      "denyWrite": {{ (claude_sandbox_deny_in_allowed + claude_sandbox_deny_nucleus + claude_sandbox_deny_write) | to_json }},
       "denyRead": {{ claude_sandbox_deny_read | to_json }}
     },
     "network": {{ claude_sandbox_network | to_json }}
