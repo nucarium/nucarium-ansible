@@ -1,26 +1,112 @@
 #!/usr/bin/python3 -I
-import json, os, time, urllib.request
-import jwt
+# Mints the GitHub App's installation tokens for the agents, as the broker
+# user, every 20 minutes. Each lasts an hour. Written by the Nucarium box
+# recipe from group_vars/all.yml; the next run rewrites this file.
+#
+# One token per file, each for the repositories named for it and with
+# PERMISSIONS only, never for everything the App is installed on: the host's
+# (github), and one for each environment that uses the App
+# (environments/<name>/github), whose container has that folder alone.
+#
+#   agent-github-token          Mint them all.
+#   agent-github-token --show   Print what each would be asked for, and ask
+#                               nothing: no key is read and no token minted.
+import json, os, shutil, sys, time, urllib.error, urllib.request
 
 CLIENT_ID = "{{ github_app_client_id }}"
 INSTALLATION_ID = "{{ github_app_installation_id }}"
 KEY_PATH = "/etc/agent-broker/github-app.pem"
-OUT = "/run/agent-tokens/github"
+DIR = "{{ nucarium_tokens_dir }}"
+ENVIRONMENTS_DIR = "{{ nucarium_env_tokens_dir }}"
+# What every token may do (github_app_token_permissions).
+PERMISSIONS = json.loads({{ nucarium_github_token_permissions | to_json | to_json }})
+# Each token's file, under DIR, and the repositories it is for.
+TOKENS = json.loads({{ nucarium_github_tokens | to_json | to_json }})
+# The environments that keep a folder of tokens.
+ENVIRONMENTS = json.loads({{ nucarium_token_envs | to_json | to_json }})
 
-now = int(time.time())
-with open(KEY_PATH) as f:
-    pem = f.read()
-assertion = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": CLIENT_ID}, pem, algorithm="RS256")
-req = urllib.request.Request(
-    f"https://api.github.com/app/installations/{INSTALLATION_ID}/access_tokens",
-    data=b"{}", method="POST",
-    headers={"Authorization": f"Bearer {assertion}",
-             "Accept": "application/vnd.github+json",
-             "X-GitHub-Api-Version": "2022-11-28"})
-with urllib.request.urlopen(req, timeout=15) as resp:
-    token = json.load(resp)["token"]
-tmp = OUT + ".tmp"
-fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
-os.write(fd, token.encode())
-os.close(fd)
-os.replace(tmp, OUT)
+
+def request(repositories):
+    return {"repositories": repositories, "permissions": PERMISSIONS}
+
+
+def mint(assertion, repositories):
+    req = urllib.request.Request(
+        f"https://api.github.com/app/installations/{INSTALLATION_ID}/access_tokens",
+        data=json.dumps(request(repositories)).encode(), method="POST",
+        headers={"Authorization": f"Bearer {assertion}",
+                 "Accept": "application/vnd.github+json",
+                 "Content-Type": "application/json",
+                 "X-GitHub-Api-Version": "2022-11-28"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.load(resp)["token"]
+
+
+def write(out, token):
+    tmp = out + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
+    os.write(fd, token.encode())
+    os.close(fd)
+    os.replace(tmp, out)
+
+
+def remove(out):
+    try:
+        os.remove(out)
+    except FileNotFoundError:
+        pass
+
+
+def main():
+    if sys.argv[1:] == ["--show"]:
+        print(json.dumps({name: request(repositories) if repositories else None
+                          for name, repositories in TOKENS.items()}, indent=2))
+        return 0
+    # Asked for no permissions, or for no repositories, GitHub gives a token
+    # with all of them.
+    if not PERMISSIONS:
+        print("agent-github-token: github_app_token_permissions is empty, so no token is minted", file=sys.stderr)
+        return 1
+    import jwt
+    now = int(time.time())
+    with open(KEY_PATH) as f:
+        pem = f.read()
+    assertion = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": CLIENT_ID}, pem, algorithm="RS256")
+    # Exits 1 when something went wrong that may pass (the network, GitHub),
+    # which the unit tries again; 2 when all that went wrong is that GitHub
+    # refused what was asked for, which only a change to the settings mends.
+    passing = refused = False
+    for name, repositories in TOKENS.items():
+        out = os.path.join(DIR, name)
+        if not repositories:
+            remove(out)
+            continue
+        os.makedirs(os.path.dirname(out), mode=0o750, exist_ok=True)
+        # One that fails keeps the token it had, and the others are still
+        # minted.
+        try:
+            write(out, mint(assertion, repositories))
+        except urllib.error.HTTPError as e:
+            if e.code == 422:
+                refused = True
+            else:
+                passing = True
+            print(f"agent-github-token: no token for {name} ({', '.join(repositories)}): "
+                  f"GitHub answered {e.code}: {e.read().decode(errors='replace').strip()}", file=sys.stderr)
+            if e.code == 422:
+                print("Each repository must be one the GitHub App is installed on, and each of "
+                      f"{', '.join(sorted(PERMISSIONS))} a permission the App has "
+                      "(repos and github_app_token_permissions in group_vars/all.yml).", file=sys.stderr)
+        except OSError as e:
+            passing = True
+            print(f"agent-github-token: no token for {name}: {e}", file=sys.stderr)
+    # The folder of an environment that is gone, or no longer uses the App.
+    if os.path.isdir(ENVIRONMENTS_DIR):
+        for had in os.listdir(ENVIRONMENTS_DIR):
+            if had not in ENVIRONMENTS:
+                shutil.rmtree(os.path.join(ENVIRONMENTS_DIR, had), ignore_errors=True)
+    return 1 if passing else 2 if refused else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

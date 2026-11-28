@@ -8,9 +8,9 @@
 # with an error about template syntax. Each is tried on its own first, so the
 # message can say which one to mark !unsafe.
 #
-# repos, secret_variables, github and start_script are a container
-# environment's alone: on the host every environment shares the box's
-# repositories, GitHub App and identity.
+# repos, github and start_script are a container environment's alone: on
+# the host every environment shares the box's repositories, GitHub App and
+# identity. secret_variables is either's, with the same rules for its names.
 - name: Try each environment's script, variables and hosts as Ansible reads them
   ansible.builtin.assert:
     that: environments[item.0][item.1] | default('') | to_json | length > 0
@@ -41,14 +41,15 @@
   vars:
     env_known_keys: [name, config_dir, capacity, runtime, network, allowed_hosts, variables, setup_script, repos, secret_variables, github, start_script]
     # The keys only an environment with runtime: container may have.
-    env_container_only: "{{ ['repos', 'secret_variables', 'github', 'start_script'] | select('in', env.keys() | list) | list }}"
+    env_container_only: "{{ ['repos', 'github', 'start_script'] | select('in', env.keys() | list) | list }}"
     # A shell variable name, as bash takes it after `export`.
     env_variable_name: '^[A-Za-z_][A-Za-z0-9_]*$'
     # An entry of repos, as the box's repos takes it: a name, or owner/name.
     env_repo: '^([A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+$'
     env_repo_names: "{{ env.repos | select('string') | map('basename') | list if env.repos is defined and env.repos is sequence and env.repos is not string and env.repos is not mapping else [] }}"
     # The variables the container's unit sets itself, which a secret
-    # variable of the same name would take the place of.
+    # variable of the same name would take the place of. The same names on
+    # the host, where the session would lose its own PATH or login.
     env_unit_variables: [HOME, PATH, CLAUDE_CONFIG_DIR, DISABLE_AUTOUPDATER, NUCLEATE_CONFIG, NUCLEATED_CONFIG, NPM_CONFIG_GLOBALCONFIG,
                          http_proxy, https_proxy, HTTP_PROXY, HTTPS_PROXY, no_proxy, NO_PROXY, NODE_USE_ENV_PROXY]
     env_secret_names: "{{ env_secret_variables | map('string') | list if env_secret_variables is sequence and env_secret_variables is not string and env_secret_variables is not mapping else [] }}"
@@ -96,7 +97,7 @@
          else (['secret_variables has names that are not shell variable names (letters, digits and _, not starting with a digit): ' ~ (env_secret_names | reject('match', env_variable_name) | join(', '))] if env_secret_names | reject('match', env_variable_name) | list else [])
             + (['secret_variables has names that are also in variables: ' ~ (env_secret_names | select('in', env_variables.keys() | map('string') | list) | join(', ')) ~ ' (a variable is either plain or secret)'] if env_variables is mapping and env_secret_names | select('in', env_variables.keys() | map('string') | list) | list else [])
             + (['secret_variables names a variable more than once, or two whose names differ only in case: ' ~ (env_secret_names | map('lower') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | join(', '))] if env_secret_names | map('lower') | unique | list | length != env_secret_names | length else [])
-            + (['secret_variables has names the container sets itself: ' ~ ((env_secret_names | select('in', env_unit_variables) | list) + (env_secret_names | select('match', '^AGENT_SERVER_') | list)) | join(', ')] if env_secret_names | select('in', env_unit_variables) | list or env_secret_names | select('match', '^AGENT_SERVER_') | list else []))
+            + (['secret_variables has names the ' ~ ('container' if env_runtime == 'container' else 'box') ~ ' sets itself: ' ~ ((env_secret_names | select('in', env_unit_variables) | list) + (env_secret_names | select('match', '^AGENT_SERVER_') | list)) | join(', ')] if env_secret_names | select('in', env_unit_variables) | list or env_secret_names | select('match', '^AGENT_SERVER_') | list else []))
       + ([] if env.github is not defined
          else (['github is the environment' ~ "'" ~ 's Git identity, name: and email: (an address, such as dev@example.com), and nothing else'] if env.github is not mapping or env.github.keys() | map('string') | sort != ['email', 'name'] or env.github.name is not string or env.github.email is not string or env.github.name | trim | length == 0 or env.github.name is search('[\n<>]') or env.github.email is not match(env_email) else [])
             + (['github needs GITHUB_TOKEN in secret_variables: the environment' ~ "'" ~ 's Git credential helper answers with that token'] if 'GITHUB_TOKEN' not in env_secret_names else []))
@@ -108,6 +109,28 @@
     loop_var: env
     label: "{{ env.name | default(env) }}"
     extended: true
+
+# What the broker asks GitHub for (the broker role): asked for no
+# permissions GitHub gives every one the App has, and it names at most 500
+# repositories in a token.
+- name: Check what the GitHub App's tokens are for
+  ansible.builtin.fail:
+    msg: >-
+      group_vars/all.yml: {{ env_token_problems | join('; ') }}. Nothing on the box has been changed.
+  when: env_token_problems | length > 0
+  vars:
+    env_token_permissions_ok: >-
+      {{ nucarium_github_token_permissions is mapping and nucarium_github_token_permissions | length > 0
+      and nucarium_github_token_permissions.values() | reject('in', ['read', 'write']) | list | length == 0 }}
+    # The tokens that would name too many repositories, by their file.
+    env_token_wide: >-
+      {{ nucarium_github_tokens | dict2items | map(attribute='key')
+      | zip(nucarium_github_tokens.values() | map('length')) | selectattr(1, 'gt', nucarium_github_token_repos_max) | map('first') | list }}
+    env_token_problems: >-
+      {{
+        (['github_app_token_permissions is a set of permission: level lines, each level read or write, with at least one (contents: write, pull_requests: write, checks: read, metadata: read)'] if not env_token_permissions_ok else [])
+      + (['the GitHub token ' ~ (env_token_wide | join(', ')) ~ ' would name more than ' ~ nucarium_github_token_repos_max ~ ' repositories of ' ~ github_org ~ ', and GitHub names at most that many in one: list fewer in repos'] if env_token_wide else [])
+      }}
 
 # Each secret variable is the agent user's Podman secret named after the
 # environment and the variable (nucarium_env_secrets, vars/runtime.yml), and
@@ -126,8 +149,15 @@
 # podman and docker run outside the sandbox of a session on the host
 # (excludedCommands), as the agent user, who owns every container's Podman
 # secrets, keys and logins: such a session could read them all. So a box
-# with an environment that holds secrets of its own has every environment in
-# a container, where the container is the boundary.
+# with a container environment that holds secrets of its own has every
+# environment in a container, where the container is the boundary.
+#
+# An environment on the host with secret_variables is not one of those: the
+# host's environments share the agent user, so its secret variables are kept
+# from container environments (which have none of its folder or login) and
+# not from the other environments on the host. It asks nothing of the rest
+# of the box, and a box with one may not have a container environment with
+# github or secret_variables, as before.
 - name: Check no environment on the host shares the box with one that has secrets of its own
   ansible.builtin.fail:
     msg: >-
@@ -141,7 +171,7 @@
   vars:
     env_own_secrets: >-
       {{ (environments | selectattr('github', 'defined') | list
-      + environments | selectattr('secret_variables', 'defined') | selectattr('secret_variables') | list) | unique }}
+      + environments | selectattr('name', 'in', nucarium_container_envs) | selectattr('secret_variables', 'defined') | selectattr('secret_variables') | list) | unique }}
     env_on_host: "{{ environments | rejectattr('name', 'in', nucarium_container_envs) | list }}"
     # With logins and setups, a setup's keys are the same in all its pairs, so
     # the message names setups.

@@ -8,11 +8,14 @@ Type=oneshot
 EnvironmentFile=/etc/restic/env
 # Sign-ins are left out: the Claude logins and the Nucarium Watch machine
 # token are replaced by signing in again, not by restoring a copy. So is the
-# notifier's token, which the playbook writes again from 1Password.
+# notifier's token, which the playbook writes again from 1Password. And each
+# login's session-env folder, where a session's variables are while it
+# runs, the secret variables of an environment on the host among them.
 ExecStart=/usr/bin/restic backup \
 {% for dir in day2_claude_dirs %}
   --exclude {{ dir }}/.credentials.json \
   --exclude {{ dir }}/remote \
+  --exclude {{ dir }}/session-env \
 {% endfor %}
   --exclude {{ day2_watch_token_file }} \
   --exclude {{ day2_notify_token_file }} \

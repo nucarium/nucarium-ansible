@@ -112,10 +112,13 @@ Volume={{ agent_home }}/.local/bin:{{ agent_home }}/.local/bin:ro
 Volume={{ nucarium_nucleated_hook_dir }}:{{ nucarium_nucleated_hook_dir }}:ro
 Volume={{ nucarium_nucleated_spools_dir }}/{{ env.name }}:{{ nucarium_nucleated_state_dir }}/spool
 {% if not env_github %}
-# The GitHub App's token; the environment's variables, setup files, nucleate
-# configuration and repository list; the box's helpers; and its Git and npm
-# settings: all read-only.
-Volume=/run/agent-tokens:/run/agent-tokens:ro
+# The environment's own folder of the broker's tokens, where the host has
+# the box's: the GitHub App's token for this environment's repositories
+# alone. Never the host's folder, which holds the token for every
+# environment's repositories. Then the environment's variables, setup files,
+# nucleate configuration and repository list; the box's helpers; and its Git
+# and npm settings: all read-only.
+Volume={{ nucarium_env_tokens_dir }}/{{ env.name }}:{{ nucarium_tokens_dir }}:ro
 {% else %}
 # The environment's variables, setup files, nucleate configuration and
 # repository list; the box's helpers; and, where the box's Git settings

@@ -116,6 +116,47 @@ nucarium_git_credential_helper: >-
   !f() { [ "$1" = get ] && printf "username=x-access-token\npassword=%s\n"
   "$(cat /run/agent-tokens/github)"; }; f
 
+# What the GitHub App's tokens may do, whatever the App itself was given:
+# clone, fetch and push (contents), open and update pull requests, and read
+# how CI went (checks). github_app_token_permissions in group_vars/all.yml
+# replaces the set; a settings file from before it existed gets this one,
+# which is what the guide has the App created with. GitHub refuses a token
+# that asks for a permission the App does not have.
+nucarium_github_token_permissions: >-
+  {{ github_app_token_permissions | default({'contents': 'write', 'pull_requests': 'write', 'checks': 'read', 'metadata': 'read'}, true) }}
+
+# The tokens the broker mints, each for named repositories only, as the file
+# it keeps in /run/agent-tokens and the names it asks GitHub for:
+#
+#   github                       The host's: the box's repos and those of
+#                                every environment that uses the GitHub App.
+#                                Sessions on the host, nucleate and nucleated
+#                                read it.
+#   environments/<name>/github   One environment's own repositories (its
+#                                repos, else the box's). Its container has
+#                                this folder where the host has
+#                                /run/agent-tokens, so it holds a token for
+#                                nothing else.
+#
+# An environment with a GitHub identity of its own (github) has neither. One
+# installation is one account's, so only github_org's repositories are named,
+# without their owner, as GitHub takes them: a token never reached another
+# owner's repository anyway. A token that would name none is not minted;
+# asked for none, GitHub would give one for every repository.
+nucarium_github_tokens: >-
+  {% set org = '(?i)^' ~ (github_org | regex_escape) ~ '/' %}{% set ns = namespace(out={}, every=repos | list) %}{% for e in environments | rejectattr('github', 'defined') %}{% set own = e.repos if e.repos is defined else repos %}{% set ns.every = ns.every + own %}{% set ns.out = ns.out | combine({'environments/' ~ e.name ~ '/github': ((own | reject('search', '/') | list) + (own | select('match', org) | map('basename') | list)) | unique}) %}{% endfor %}{{ {'github': ((ns.every | reject('search', '/') | list) + (ns.every | select('match', org) | map('basename') | list)) | unique} | combine(ns.out) }}
+
+# The most repositories GitHub names in one token.
+nucarium_github_token_repos_max: 500
+
+# The environments that have a folder of tokens of their own
+# (/run/agent-tokens/environments/<name>): every one that uses the GitHub
+# App, on the host too, since one moved back to the host keeps its container
+# until it stops by itself.
+nucarium_token_envs: "{{ environments | rejectattr('github', 'defined') | map(attribute='name') | list }}"
+nucarium_tokens_dir: /run/agent-tokens
+nucarium_env_tokens_dir: "{{ nucarium_tokens_dir }}/environments"
+
 # The same, in a container environment with a GitHub identity of its own
 # (github on the environment): its own token, the secret variable
 # GITHUB_TOKEN its container has (secret_variables), and never the App's.
@@ -158,6 +199,20 @@ nucarium_environment_secrets: >-
 nucarium_env_secret_prefix: nucarium-env-
 nucarium_env_secrets: >-
   {% set ns = namespace(out=[]) %}{% for e in environments if e.name in nucarium_container_envs %}{% for name in e.secret_variables | default([], true) %}{% set ns.out = ns.out + [{'env': e.name, 'name': name, 'secret': nucarium_env_secret_prefix ~ e.name ~ '-' ~ (name | lower | replace('_', '-'))}] %}{% endfor %}{% endfor %}{{ ns.out }}
+
+# The same setting on an environment on the host, with the same values:
+# each of its secret variables, by environment and name. There they are a
+# file, not Podman secrets: nucarium_host_secrets_file in the environment's
+# own folder (/etc/nucarium/environments/<name>/), root's, which the agent
+# user reads through its group and nobody else does (the env_setup role
+# writes it). The session hook adds it to each new session of the
+# environment, after its variables (session-env.sh, the claude role), and
+# sandboxed commands on the host may not read it (the claude role).
+nucarium_host_env_secrets: >-
+  {% set ns = namespace(out=[]) %}{% for e in environments if e.name not in nucarium_container_envs %}{% for name in e.secret_variables | default([], true) %}{% set ns.out = ns.out + [{'env': e.name, 'name': name}] %}{% endfor %}{% endfor %}{{ ns.out }}
+nucarium_host_secrets_file: secret-variables.sh
+# The environments on the host that have any.
+nucarium_host_secret_envs: "{{ nucarium_host_env_secrets | map(attribute='env') | unique | list }}"
 
 # nucleated's state folder, which holds the spool its hooks write session
 # events to: the daemon's own default, written out. Hooks on the host write

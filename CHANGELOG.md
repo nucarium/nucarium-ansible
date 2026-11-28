@@ -4,6 +4,104 @@ Every change to the settings in `group_vars/all.yml` and `inventory.ini` is
 listed here, because the installer at `nucarium.sh` and your own copy of those
 two files both depend on their names.
 
+## Narrower tokens, a tighter sandbox on the host, secret variables on the host, and no Terraform token
+
+This entry has no version number of its own: the release that carries it is
+numbered when it is published.
+
+Fixes from a security review of the recipe. The GitHub tokens the broker
+mints are for named repositories and named permissions, where each was for
+everything the GitHub App is installed on. A container environment has a
+token for its own repositories only. The recipe no longer installs Terraform
+or handles a Terraform token; an environment on the host can have secret
+variables instead, as a container environment can. Sandboxed commands on
+the host can no longer read the Claude logins' sign-ins or `nucleated`'s
+tokens, or write the nucleus's `AGENTS.md`, `CLAUDE.md`, `.mcp.json`,
+`.claude/` and `.seeds/`.
+And no task runs as root on a path in the agent user's home.
+
+### Settings added
+
+| Setting | Default | What it is |
+|---|---|---|
+| `github_app_token_permissions` | `contents: write`, `pull_requests: write`, `checks: read`, `metadata: read` | What the GitHub App's tokens may do, as GitHub names the App's repository permissions, each `read` or `write`. GitHub refuses a token that asks for one the App does not have. If your agents use issues, workflow dispatches or the Workflows permission, and the App has them, add `issues: write`, `actions: write` or `workflows: write`: until then their tokens no longer carry them. |
+
+### Settings removed
+
+| Setting | What to do |
+|---|---|
+| `hcp_mode` | Delete it. The playbook stops, changing nothing, while it is `file` or `vault`; `none` is ignored. |
+| `secret_refs.hcp_token`, `secret_refs.vault_read_token` | Delete them. They are no longer read. |
+
+No setting is renamed.
+
+### Settings changed
+
+| Setting | What changed |
+|---|---|
+| `secret_variables` on an environment or a setup | Taken on the host too, where the playbook refused it, with the same rules for the names and the values in the same place: `environment_secrets.<env>.<NAME>` (or `setup_secrets.<setup>.<NAME>`) in your file of environment secrets. Each new session of the environment gets them. They are kept in `/etc/nucarium/environments/<env>/secret-variables.sh`, which only root and the agent user read and sandboxed commands cannot. Every command of the session has the variables themselves, and they are not kept from the other environments on the host, which run as the same user. A container environment with `github` or `secret_variables` still needs every environment on the box in a container. |
+
+### Roles and tags
+
+| Role | What changed |
+|---|---|
+| `env_setup` | Writes the secret variables of each environment on the host to `secret-variables.sh` in its folder (root's, group the agent user's, mode 640), and removes the file when the environment lists none or moves into a container. |
+| `broker` | Mints `/run/agent-tokens/github` for the box's `repos` and every App-using environment's `repos`, and `/run/agent-tokens/environments/<name>/github` for each such environment's own. Only `github_org`'s repositories are named: one installation's token never reached another owner's. A changed `repos` now needs `--tags broker` before `workspace`. `agent-github-token --show` prints what each token is asked for. No longer fetches a Terraform token, and removes the one a box has: `agent-hcp-token.timer` and `.service`, `/usr/local/sbin/agent-hcp-token`, `/etc/agent-broker/hcp-token` and `vault-read-token`, and every `hcp` file in `/run/agent-tokens`. |
+| `toolchain` | No longer installs Terraform, the 1Password CLI or their package sources. |
+| `agent_servers` | A container mounts `/run/agent-tokens/environments/<name>` where it mounted all of `/run/agent-tokens`, and the role declares and makes that folder. A running container keeps the old mount until it next starts. |
+| `claude` | No longer installs the Terraform credentials helper, and removes the one a box has: `~agent/.terraform.d/plugins/terraform-credentials-agentvault` and its block in `~agent/.terraformrc` (the file too, when nothing else is in it). Each host login's sandbox settings deny reading every login's `.credentials.json` and `~/.config/nucleated`, and deny writing the five files and folders at the nucleus's root. New sessions have them. `nucleated status` and `nucleate whoami` no longer answer from inside a session's command. The session hook adds the secret variables of an environment on the host to each new session, and the sandbox settings deny reading the files that hold them: `/etc/nucarium/environments/*/secret-variables.sh`, and the `session-env` folder of each such environment's login. |
+| `workspace` | Makes `AGENTS.md`, `CLAUDE.md` and `.mcp.json` in the host's nucleus when they are missing, empty, so that the sandbox can hold them read-only. |
+| `users`, `cloud_parity` | The agent user's `.ssh`, its `authorized_keys`, and the folders sandboxed commands write are made as the agent user, not as root. |
+| `env_runtime` | The box's commit-signing key is read as the agent user and written by root to `/etc/nucarium/box`. |
+| `day2` | The nightly backup leaves out each login's `session-env` folder, which holds a session's variables while it runs. |
+
+### A box built with an earlier copy of the recipe
+
+Run the whole playbook once: the token folders, the units and the sandbox
+settings change together. Before you do, check two things on GitHub, or the
+broker mints no token and says why in `journalctl -u agent-github-token`:
+
+- every repository in `repos` that belongs to `github_org` is one the App is
+  installed on (one it is not installed on now fails the whole token, where
+  before only that clone failed);
+- the App has Contents, Pull requests and Checks, as the guide sets it up,
+  or `github_app_token_permissions` lists only what it has.
+
+Restart each container environment's agent server at a quiet moment to give
+it its own token folder.
+
+If the box had `hcp_mode` `file` or `vault`:
+
+- Delete `hcp_mode`, `secret_refs.hcp_token` and
+  `secret_refs.vault_read_token` from `group_vars/all.yml`. The playbook
+  stops until `hcp_mode` is gone or `none`.
+- The next run removes the token, its timer and the credentials helper from
+  the box, as the table above lists. Sessions lose the token at once.
+- The `terraform` and `1password-cli` packages and their package sources
+  stay installed, and still get security updates. The recipe no longer
+  manages them: remove them with `apt` if you do not want them.
+- To give an environment the token again, on the host or in a container,
+  name the variable Terraform reads in its `secret_variables`:
+
+  ```yaml
+  environments:
+    - name: main
+      secret_variables:
+        - TF_TOKEN_app_terraform_io
+  ```
+
+  and put the value in your file of environment secrets
+  (`-e @environment-secrets.yml`):
+
+  ```yaml
+  environment_secrets:
+    main:
+      TF_TOKEN_app_terraform_io: "..."
+  ```
+
+  Run `--tags claude,env_setup` with that file; new sessions have the
+  token. On the host, the other environments' sessions can reach it too.
+
 ## Session names in Watch
 
 This entry has no version number of its own: the release that carries it is

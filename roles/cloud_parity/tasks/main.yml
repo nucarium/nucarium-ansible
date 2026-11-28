@@ -169,14 +169,17 @@
     mode: u=rwX,go=rX
     recurse: true
 
+# As the agent user, not as root with owner: set. Sandboxed commands write
+# these folders and the ones around them, so one could be a link by the next
+# run, and root would make whatever it leads to the agent user's.
 - name: Create the folders sandboxed commands may write
   ansible.builtin.file:
     path: "{{ agent_home }}/{{ item }}"
     state: directory
-    owner: "{{ agent_user }}"
-    group: "{{ agent_user }}"
     mode: "0755"
   loop: "{{ sandbox_agent_dirs + ['go/bin'] }}"
+  become: true
+  become_user: "{{ agent_user }}"
 
 # The sandbox can only hold a folder read-only if it is there when a session
 # starts; a missing one could be made, and written, by a sandboxed command.
@@ -185,9 +188,9 @@
   ansible.builtin.file:
     path: "{{ agent_home }}/.local/state/nucleated"
     state: directory
-    owner: "{{ agent_user }}"
-    group: "{{ agent_user }}"
     mode: "0700"
+  become: true
+  become_user: "{{ agent_user }}"
 
 # pnpm keeps its locks in the user's runtime folder, which is new at every
 # boot. These folders are made at login so the sandbox can let agents write

@@ -6,6 +6,15 @@
 # /etc/nucarium/environments/<name>/variables.sh. The same on the host and in
 # a container environment, which has both folders mounted at their own paths
 # and HOME=/root.
+#
+# Last, on the host, the environment's secret variables (secret_variables),
+# from secret-variables.sh beside it, which only root and the agent user
+# read. Claude Code runs what is in CLAUDE_ENV_FILE ahead of each command,
+# having read it itself, so the values are copied into it, and the file is
+# then the agent user's alone. Sandboxed commands may read neither file (the
+# claude role's denyRead); each has the variables themselves. A container
+# environment has no such file: its secret variables are its container's,
+# from Podman secrets.
 if [ -n "$CLAUDE_ENV_FILE" ]; then
   cat >> "$CLAUDE_ENV_FILE" <<'ENVEOF'
 # The GitHub App's token when it can be read; else, in a container
@@ -38,6 +47,10 @@ ENVEOF
       variables="/etc/nucarium/environments/$1/variables.sh"
       if [ -r "$variables" ]; then
         cat "$variables" >> "$CLAUDE_ENV_FILE"
+      fi
+      secrets="/etc/nucarium/environments/$1/secret-variables.sh"
+      if [ -r "$secrets" ]; then
+        chmod 600 "$CLAUDE_ENV_FILE" && cat "$secrets" >> "$CLAUDE_ENV_FILE"
       fi
       ;;
   esac

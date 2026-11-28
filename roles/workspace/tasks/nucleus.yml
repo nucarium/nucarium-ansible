@@ -50,6 +50,26 @@
         mode: "0644"
       when: (playbook_dir ~ '/agent-context/AGENTS.md') is file
 
+    # Sandboxed commands may write the nucleus but not these, which later
+    # sessions read as instructions or MCP servers (the claude role), and
+    # the sandbox holds a file read-only only if it is there when a session
+    # starts: a missing one a command could make. One you have is kept.
+    - name: Make sure the nucleus has the files sandboxed commands may not write, empty ones when you have none
+      ansible.builtin.copy:
+        content: "{{ item.content }}"
+        dest: "{{ nucleus_root }}/{{ item.path }}"
+        mode: "0644"
+        force: false
+      loop:
+        - path: AGENTS.md
+          content: ""
+        - path: CLAUDE.md
+          content: ""
+        - path: .mcp.json
+          content: "{\"mcpServers\": {}}\n"
+      loop_control:
+        label: "{{ item.path }}"
+
     # An entry with a slash names its owner (other-org/tools); a bare name
     # belongs to github_org. Sessions see each repo under its GitHub slug.
     - name: Make each repository available

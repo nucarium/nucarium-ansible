@@ -69,6 +69,14 @@ render_expected_secrets:
   docs:
     - Secret=nucarium-env-docs-node-auth-token,type=env,target=NODE_AUTH_TOKEN
 
+# The repositories each GitHub token names, by its file. acme has a GitHub
+# identity of its own, so no token of the App's; tools has no repository of
+# github_org's, so none is minted for it.
+render_expected_token_repos:
+  github: [web, api]
+  environments/tools/github: []
+  environments/docs/github: [web, api]
+
 # The repositories each container environment's server clones.
 render_expected_repos:
   acme:

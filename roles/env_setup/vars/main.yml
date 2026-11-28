@@ -1,7 +1,9 @@
 ---
 # Root's copy of each environment's setup script and variables, one folder per
 # environment: setup.sh is root's alone (0700); variables.sh is readable by
-# the agent user, whose session hook reads it. Beside them, runtime (host or
+# the agent user, whose session hook reads it, and so is secret-variables.sh,
+# the secret variables of an environment on the host, but by that user alone
+# (root's, its group the agent user's, 0640). Beside them, runtime (host or
 # container), and for a container environment image.env and network.env,
 # what its image is built from besides the script (tasks/container.yml), its
 # start script (start.sh, readable by all), and with a GitHub identity of its
