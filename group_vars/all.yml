@@ -405,6 +405,12 @@ box_notify_url: ""
 # true needs a nucleated that knows the setting; an older one refuses it.
 watch_worktree_actions: false
 
+# Whether Watch shows each session by its name, as the agent or the tool that
+# runs it has it, in place of its short id. false: no name is read on the box
+# and none is sent. true needs a nucleated that knows the setting; an older
+# one refuses it.
+watch_session_names: false
+
 # ---------------------------------------------------------------------------
 # UPS
 # ---------------------------------------------------------------------------

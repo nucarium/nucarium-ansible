@@ -4,4 +4,8 @@
 # token, and nothing the daemon reads. Written by the Nucarium box recipe
 # from group_vars/all.yml; the next run rewrites this file.
 state_dir = "{{ nucarium_nucleated_state_dir }}"
+{% if watch_session_names | default(false) | bool %}
+# The hook reads each session's name only when this says so.
+session_names = true
+{% endif %}
 {% include 'nucleated-environments.toml.j2' %}
